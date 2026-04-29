@@ -157,6 +157,10 @@ activemq-data/
 .env
 .envrc
 .venv
+.cert/
+
+# Extractor output
+output/
 env/
 venv/
 ENV/

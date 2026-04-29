@@ -1,13 +1,22 @@
 .PHONY: install run test check clean
 
+PYTHON := $(if $(wildcard .venv/bin/python),.venv/bin/python,python)
+PIP := $(if $(wildcard .venv/bin/pip),.venv/bin/pip,pip)
+
+# If a local CA bundle exists, use it (needed for hosts whose TLS chain is missing intermediates).
+CA_BUNDLE := $(wildcard .cert/bundle.pem)
+ifneq ($(CA_BUNDLE),)
+export REQUESTS_CA_BUNDLE := $(abspath $(CA_BUNDLE))
+endif
+
 install:
-	pip install -r requirements.txt
+	$(PIP) install -r requirements.txt
 
 run:
-	python -m src.extractor
+	$(PYTHON) -m src.extractor
 
 test:
-	python -m pytest tests/ -v
+	$(PYTHON) -m pytest tests/ -v
 
 check:
 	@echo "Checking output directory..."

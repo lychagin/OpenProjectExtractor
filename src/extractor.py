@@ -1,6 +1,7 @@
 import os
 import sys
 import csv
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -21,40 +22,57 @@ load_dotenv()
 # Configuration
 OPENPROJECT_URL = os.getenv('OPENPROJECT_URL', 'https://projects-customdev.wone-it.ru')
 PROJECT_IDENTIFIER = os.getenv('PROJECT_IDENTIFIER', 'dom-zhkkh')
-API_TOKEN = os.getenv('OPENPROJECT_API_TOKEN') or os.getenv('OPENPROJECTTOKEN') or os.getenv('OPENPROJECTTOKEN')
+API_TOKEN = os.getenv('OPENPROJECT_API_TOKEN') or os.getenv('OPENPROJECTTOKEN')
 OUTPUT_DIR = Path('output')
 OUTPUT_PREFIX = 'res'
 OUTPUT_SUFFIX = '.csv'
 CSV_SEPARATOR = ';'
 DEFAULT_PAGE_SIZE = 100
+BUG_TYPE_NAME = os.getenv('BUG_TYPE_NAME', 'Bug')
 
 
-def get_api_headers():
-    """Create headers for API requests."""
+def get_api_auth():
+    """Return Basic auth tuple for OpenProject API ('apikey' user, token as password)."""
     if not API_TOKEN:
         logger.error("OPENPROJECT_API_TOKEN not found in environment variables")
         raise ValueError("OPENPROJECT_API_TOKEN is required")
+    return ('apikey', API_TOKEN)
+
+
+def get_api_headers():
     return {
-        'Authorization': f'Bearer {API_TOKEN}',
         'Content-Type': 'application/json',
-        'Accept': 'application/json'
+        'Accept': 'application/json',
     }
 
 
-def fetch_work_packages(page=1, per_page=DEFAULT_PAGE_SIZE):
+def get_bug_type_id():
+    """Look up the numeric type ID for BUG_TYPE_NAME in this project."""
+    url = f"{OPENPROJECT_URL}/api/v3/projects/{PROJECT_IDENTIFIER}/types"
+    response = requests.get(url, headers=get_api_headers(), auth=get_api_auth(), timeout=30)
+    response.raise_for_status()
+    for el in response.json().get('_embedded', {}).get('elements', []):
+        if el.get('name') == BUG_TYPE_NAME:
+            return str(el.get('id'))
+    raise ValueError(f"Type '{BUG_TYPE_NAME}' not found in project '{PROJECT_IDENTIFIER}'")
+
+
+def fetch_work_packages(page=1, per_page=DEFAULT_PAGE_SIZE, type_id=None):
     """Fetch work packages from OpenProject API with pagination support."""
     url = f"{OPENPROJECT_URL}/api/v3/projects/{PROJECT_IDENTIFIER}/work_packages"
-    
+
+    filters = json.dumps([{"type": {"operator": "=", "values": [type_id]}}])
     params = {
-        'page': page,
-        'perPage': per_page,
-        'filters': '[{"type":{"operator":"=","values":["Bug"]}}]'
+        'offset': page,
+        'pageSize': per_page,
+        'filters': filters,
     }
-    
+
     headers = get_api_headers()
-    
+    auth = get_api_auth()
+
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=30)
+        response = requests.get(url, headers=headers, params=params, auth=auth, timeout=30)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.HTTPError as e:
@@ -84,38 +102,29 @@ def extract_bugs():
     
     logger.info(f"Starting extraction from project: {PROJECT_IDENTIFIER}")
     logger.info(f"API URL: {OPENPROJECT_URL}/api/v3/projects/{PROJECT_IDENTIFIER}/work_packages")
-    
+
+    type_id = get_bug_type_id()
+    logger.info(f"Resolved type '{BUG_TYPE_NAME}' to id={type_id}")
+
     while True:
         logger.info(f"Fetching page {page}...")
-        data = fetch_work_packages(page=page)
-        
-        # Get total count from first page
+        data = fetch_work_packages(page=page, type_id=type_id)
+
         if total_count is None:
-            total_count = data.get('_meta', {}).get('count', 0)
+            total_count = data.get('total', 0)
             logger.info(f"Total work packages to process: {total_count}")
-        
-        # Extract work packages from _embedded or _links
+
         elements = data.get('_embedded', {}).get('elements', [])
-        
         if not elements:
-            logger.info("No more work packages to fetch.")
             break
-        
+
         for wp in elements:
-            bug_id = wp.get('id')
-            bug_title = wp.get('subject', '')
-            all_bugs.append({
-                'id': bug_id,
-                'title': bug_title
-            })
-        
-        logger.info(f"Extracted {len(all_bugs)} bugs so far...")
-        
-        # Check if there are more pages
-        next_link = data.get('_links', {}).get('next', {})
-        if not next_link:
+            all_bugs.append({'id': wp.get('id'), 'title': wp.get('subject', '')})
+
+        logger.info(f"Extracted {len(all_bugs)} / {total_count} bugs so far...")
+
+        if len(all_bugs) >= total_count:
             break
-        
         page += 1
     
     logger.info(f"Extraction complete. Total bugs found: {len(all_bugs)}")

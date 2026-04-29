@@ -1,158 +1,133 @@
-import os
-import sys
 import csv
+import json
+import sys
 import tempfile
-from datetime import datetime
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-# Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+
+import extractor
+
+
+class TestGetApiAuth(unittest.TestCase):
+    def test_returns_basic_auth_tuple(self):
+        extractor.API_TOKEN = 'test_token_123'
+        self.assertEqual(extractor.get_api_auth(), ('apikey', 'test_token_123'))
+
+    def test_raises_without_token(self):
+        extractor.API_TOKEN = None
+        with self.assertRaises(ValueError):
+            extractor.get_api_auth()
 
 
 class TestGetApiHeaders(unittest.TestCase):
-    def setUp(self):
-        # Import after setting up module path
-        import extractor
-        self.extractor = extractor
-
-    def test_returns_valid_headers(self):
-        self.extractor.API_TOKEN = 'test_token_123'
-        headers = self.extractor.get_api_headers()
-        self.assertEqual(headers['Authorization'], 'Bearer test_token_123')
-        self.assertEqual(headers['Content-Type'], 'application/json')
+    def test_no_auth_header(self):
+        # Auth is sent via requests' `auth=` kwarg, not via headers.
+        headers = extractor.get_api_headers()
+        self.assertNotIn('Authorization', headers)
         self.assertEqual(headers['Accept'], 'application/json')
 
-    def test_raises_without_token(self):
-        self.extractor.API_TOKEN = None
-        with self.assertRaises(ValueError):
-            self.extractor.get_api_headers()
+
+class TestGetBugTypeId(unittest.TestCase):
+    def setUp(self):
+        extractor.API_TOKEN = 'tok'
+
+    def _mock_types_response(self, types):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {'_embedded': {'elements': types}}
+        return resp
+
+    def test_resolves_name_to_id(self):
+        with patch.object(extractor.requests, 'get',
+                          return_value=self._mock_types_response(
+                              [{'id': 1, 'name': 'Task'}, {'id': 7, 'name': 'Bug'}])):
+            self.assertEqual(extractor.get_bug_type_id(), '7')
+
+    def test_raises_when_name_missing(self):
+        with patch.object(extractor.requests, 'get',
+                          return_value=self._mock_types_response(
+                              [{'id': 1, 'name': 'Task'}])):
+            with self.assertRaises(ValueError):
+                extractor.get_bug_type_id()
 
 
 class TestFetchWorkPackages(unittest.TestCase):
     def setUp(self):
-        import extractor
-        self.extractor = extractor
+        extractor.API_TOKEN = 'tok'
 
-    def test_fetches_bugs_successfully(self):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            '_meta': {'count': 2},
-            '_embedded': {
-                'elements': [
-                    {'id': 1, 'subject': 'Bug 1'},
-                    {'id': 2, 'subject': 'Bug 2'}
-                ]
-            },
-            '_links': {}
-        }
+    def test_sends_basic_auth_and_filter_by_type_id(self):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {'total': 0, '_embedded': {'elements': []}}
 
-        with patch('extractor.requests.get') as mock_get:
-            mock_get.return_value = mock_response
-            data = self.extractor.fetch_work_packages()
-            self.assertEqual(len(data['_embedded']['elements']), 2)
-            mock_get.assert_called_once()
+        with patch.object(extractor.requests, 'get', return_value=resp) as mock_get:
+            extractor.fetch_work_packages(page=3, per_page=50, type_id='7')
 
-    def test_handles_http_401(self):
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-        mock_response.raise_for_status.side_effect = Exception('401')
+        kwargs = mock_get.call_args.kwargs
+        self.assertEqual(kwargs['auth'], ('apikey', 'tok'))
+        self.assertEqual(kwargs['params']['offset'], 3)
+        self.assertEqual(kwargs['params']['pageSize'], 50)
+        self.assertEqual(
+            json.loads(kwargs['params']['filters']),
+            [{'type': {'operator': '=', 'values': ['7']}}],
+        )
 
-        with patch('extractor.requests.get') as mock_get:
-            mock_get.return_value = mock_response
-            with self.assertRaises(Exception):
-                self.extractor.fetch_work_packages()
-
-    def test_handles_http_404(self):
-        mock_response = MagicMock()
-        mock_response.status_code = 404
-        mock_response.raise_for_status.side_effect = Exception('404')
-
-        with patch('extractor.requests.get') as mock_get:
-            mock_get.return_value = mock_response
-            with self.assertRaises(Exception):
-                self.extractor.fetch_work_packages()
+    def test_raises_on_http_error(self):
+        resp = MagicMock()
+        resp.status_code = 401
+        import requests as _requests
+        resp.raise_for_status.side_effect = _requests.exceptions.HTTPError('401')
+        with patch.object(extractor.requests, 'get', return_value=resp):
+            with self.assertRaises(_requests.exceptions.HTTPError):
+                extractor.fetch_work_packages(type_id='7')
 
 
 class TestExtractBugs(unittest.TestCase):
-    def setUp(self):
-        import extractor
-        self.extractor = extractor
+    def test_paginates_until_total_reached(self):
+        pages = [
+            {'total': 3, '_embedded': {'elements': [
+                {'id': 1, 'subject': 'A'}, {'id': 2, 'subject': 'B'}]}},
+            {'total': 3, '_embedded': {'elements': [
+                {'id': 3, 'subject': 'C'}]}},
+        ]
+        with patch.object(extractor, 'get_bug_type_id', return_value='7'), \
+             patch.object(extractor, 'fetch_work_packages', side_effect=pages) as mock_fetch:
+            bugs = extractor.extract_bugs()
 
-    def test_extract_bugs_from_single_page(self):
-        mock_data = {
-            '_meta': {'count': 2},
-            '_embedded': {
-                'elements': [
-                    {'id': 1, 'subject': 'Bug 1'},
-                    {'id': 2, 'subject': 'Bug 2'}
-                ]
-            },
-            '_links': {}
-        }
+        self.assertEqual([b['id'] for b in bugs], [1, 2, 3])
+        self.assertEqual([b['title'] for b in bugs], ['A', 'B', 'C'])
+        self.assertEqual(mock_fetch.call_count, 2)
+        # Pages requested via `page=` kwarg, starting from 1.
+        self.assertEqual(mock_fetch.call_args_list[0].kwargs['page'], 1)
+        self.assertEqual(mock_fetch.call_args_list[1].kwargs['page'], 2)
 
-        with patch.object(self.extractor, 'fetch_work_packages', return_value=mock_data):
-            bugs = self.extractor.extract_bugs()
-            self.assertEqual(len(bugs), 2)
-            self.assertEqual(bugs[0]['id'], 1)
-            self.assertEqual(bugs[0]['title'], 'Bug 1')
-
-    def test_extract_bugs_empty(self):
-        mock_data = {
-            '_meta': {'count': 0},
-            '_embedded': {'elements': []},
-            '_links': {}
-        }
-
-        with patch.object(self.extractor, 'fetch_work_packages', return_value=mock_data):
-            bugs = self.extractor.extract_bugs()
-            self.assertEqual(len(bugs), 0)
+    def test_empty_result(self):
+        empty = {'total': 0, '_embedded': {'elements': []}}
+        with patch.object(extractor, 'get_bug_type_id', return_value='7'), \
+             patch.object(extractor, 'fetch_work_packages', return_value=empty):
+            self.assertEqual(extractor.extract_bugs(), [])
 
 
 class TestSaveToCsv(unittest.TestCase):
-    def setUp(self):
-        import extractor
-        self.extractor = extractor
-
-    def test_saves_csv_correctly(self):
-        bugs = [
-            {'id': 1, 'title': 'Bug 1'},
-            {'id': 2, 'title': 'Bug 2'}
-        ]
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = self.extractor.save_to_csv(bugs, output_dir=Path(tmpdir))
-            self.assertTrue(filepath.exists())
-            self.assertTrue(str(tmpdir) in str(filepath))
-
-            with open(filepath, 'r', encoding='utf-8') as f:
-                content = f.read()
-                self.assertIn('1;Bug 1', content)
-                self.assertIn('2;Bug 2', content)
-                self.assertIn('id;title', content)
-
-    def test_csv_uses_semicolon_separator(self):
-        bugs = [{'id': 1, 'title': 'Test Bug'}]
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = self.extractor.save_to_csv(bugs, output_dir=Path(tmpdir))
-            with open(filepath, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f, delimiter=';')
-                rows = list(reader)
-                self.assertEqual(len(rows), 2)
-                self.assertEqual(rows[0], ['id', 'title'])
-                self.assertEqual(rows[1], ['1', 'Test Bug'])
+    def test_writes_header_and_rows_with_semicolon(self):
+        bugs = [{'id': 1, 'title': 'Bug 1'}, {'id': 2, 'title': 'Bug; with; semis'}]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = extractor.save_to_csv(bugs, output_dir=Path(tmp))
+            self.assertTrue(path.exists())
+            with open(path, encoding='utf-8') as f:
+                rows = list(csv.reader(f, delimiter=';'))
+            self.assertEqual(rows[0], ['id', 'title'])
+            self.assertEqual(rows[1], ['1', 'Bug 1'])
+            self.assertEqual(rows[2], ['2', 'Bug; with; semis'])
 
     def test_filename_format(self):
-        bugs = [{'id': 1, 'title': 'Bug 1'}]
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = self.extractor.save_to_csv(bugs, output_dir=Path(tmpdir))
-            filename = filepath.name
-            self.assertTrue(filename.startswith('res-'))
-            self.assertTrue(filename.endswith('.csv'))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = extractor.save_to_csv([{'id': 1, 'title': 'x'}], output_dir=Path(tmp))
+            self.assertTrue(path.name.startswith('res-'))
+            self.assertTrue(path.name.endswith('.csv'))
 
 
 if __name__ == '__main__':
