@@ -1,4 +1,7 @@
-.PHONY: install test test-integration dry-run run-once show-bug up down logs once psql
+.PHONY: install test test-integration dry-run run-once show-bug up down logs once psql datalens-up datalens-down datalens-logs
+
+# Compose files used together for the full stack (extractor + Postgres + DataLens).
+COMPOSE_FULL := -f docker-compose.yml -f docker-compose.datalens.yml
 
 PYTHON := $(if $(wildcard .venv/bin/python),.venv/bin/python,python)
 PIP := $(if $(wildcard .venv/bin/pip),.venv/bin/pip,pip)
@@ -46,3 +49,17 @@ once:
 
 psql:
 	docker compose exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
+
+# --- DataLens stack ---------------------------------------------------------
+# Heavy: 9 extra services (~3-5GB images, ~2-4GB RAM). Brings up everything
+# (extractor + Postgres + DataLens) so DataLens can reach the bugs DB by
+# hostname `postgres:5432` over the shared compose network.
+
+datalens-up:
+	docker compose $(COMPOSE_FULL) up -d
+
+datalens-down:
+	docker compose $(COMPOSE_FULL) down
+
+datalens-logs:
+	docker compose $(COMPOSE_FULL) logs -f ui ui-api us
