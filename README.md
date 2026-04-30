@@ -77,11 +77,36 @@ The connection lives in DataLens's own Postgres (`datalens-postgres` container, 
 
 For production, replace the default `admin` / `admin` by running upstream's `init.sh --hc` script — see <https://github.com/datalens-tech/datalens>.
 
+#### Gotcha: switching from `make up` to `make datalens-up`
+
+If you started with the light stack (`make up`) and then bring the full stack with `make datalens-up`, the existing `postgres` container keeps its old network aliases, leaving DataLens services unable to resolve `postgres` by hostname (the extractor itself crashloops with `failed to resolve host 'postgres'`). Recreate it once after the switch:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.datalens.yml up -d --force-recreate postgres extractor
+```
+
+Going from cold (`make datalens-up` on an empty docker state) doesn't hit this — the issue is specifically about reusing a container created under a narrower network configuration.
+
+### First dashboard
+
+Once the connection is configured, build a dataset and a dashboard:
+
+1. *Datasets* → *+ New* → connection `extractor-bugs` → drag table `v_bugs` onto the canvas → *Save* as `bugs`.
+2. Build five charts from the `bugs` dataset:
+   - **Bugs by status** — pie, color = `status_name`, measure = `count(id)`.
+   - **Bugs by priority** — pie, color = `priority_name`, measure = `count(id)`.
+   - **Bug load by assignee** — horizontal bar (Линейчатая диаграмма), Y = `assignee_name`, X = `count(id)`, sort = `count(id) DESC`, filter `assignee_name IS NOT NULL`. To approximate top-N (DataLens OSS has no built-in top-N filter at time of writing): add a measure filter like `count([id]) > 30` and tune the threshold by eye.
+   - **Open vs closed** — pie, color = `is_closed`. (`is_closed` is true for OpenProject statuses `Closed`, `No issue found`, `Rejected` — per the `v_bugs` view definition.)
+   - **New bugs per week** — line, X = `op_created_at` grouped by week, Y = `count(id)`, filter to last 12 months.
+3. *Dashboards* → *+ New* → drop the 5 charts onto the grid → *Save* as `Bugs overview`. Suggested layout: 3 small pies in row 1 (4 cols each), full-width assignee bar in row 2, full-width weekly line in row 3.
+
+The dashboard config lives in DataLens's own Postgres (the `datalens-postgres` container, in `pg-us-db`), so it survives `make datalens-down` / `up` cycles. To reset, use `docker compose -f docker-compose.yml -f docker-compose.datalens.yml down -v` (the `-v` drops the named volume).
+
 ## Tests
 
 ```bash
 make test               # 9 unit tests, fast, no DB needed
-make test-integration   # +6 integration tests, requires `make up` first
+make test-integration   # +8 integration tests, requires `make up` first
 ```
 
 Integration tests run all DML inside a single transaction that gets rolled back at teardown — safe to run against a populated production DB without losing data.
