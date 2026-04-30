@@ -161,6 +161,9 @@ activemq-data/
 
 # Extractor output
 output/
+
+# Local scratch / drafts
+tmp/
 env/
 venv/
 ENV/
