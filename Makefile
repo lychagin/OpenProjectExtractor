@@ -1,4 +1,4 @@
-.PHONY: install run test check clean
+.PHONY: install run test check clean show-bug
 
 PYTHON := $(if $(wildcard .venv/bin/python),.venv/bin/python,python)
 PIP := $(if $(wildcard .venv/bin/pip),.venv/bin/pip,pip)
@@ -17,6 +17,10 @@ run:
 
 test:
 	$(PYTHON) -m pytest tests/ -v
+
+show-bug:
+	@if [ -z "$(ID)" ]; then echo "usage: make show-bug ID=<work_package_id>"; exit 2; fi
+	@$(PYTHON) -m src.show_bug $(ID)
 
 check:
 	@echo "Checking output directory..."
