@@ -106,3 +106,33 @@ def test_null_links_become_null_columns(db_conn):
             "FROM bugs WHERE id = 1"
         )
         assert cur.fetchone() == (None, None, None, None)
+
+
+def test_v_bugs_view_hides_soft_deleted(db_conn):
+    db.upsert_bug(db_conn, _wp(id=1))
+    db.upsert_bug(db_conn, _wp(id=2))
+    db.mark_unseen_as_deleted(db_conn, [1])  # bug id=2 is now soft-deleted
+
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT id FROM v_bugs ORDER BY id")
+        ids = [r[0] for r in cur.fetchall()]
+    assert ids == [1]
+
+
+def test_v_bugs_view_derives_is_closed(db_conn):
+    closed_status = {"href": "/api/v3/statuses/9", "title": "Closed"}
+    no_issue_status = {"href": "/api/v3/statuses/10", "title": "No issue found"}
+    rejected_status = {"href": "/api/v3/statuses/11", "title": "Rejected"}
+    open_status = {"href": "/api/v3/statuses/7", "title": "In progress"}
+
+    for i, st in enumerate([closed_status, no_issue_status, rejected_status, open_status], start=1):
+        wp = _wp(id=i)
+        wp["_links"]["status"] = st
+        db.upsert_bug(db_conn, wp)
+
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT id, is_closed FROM v_bugs ORDER BY id")
+        rows = cur.fetchall()
+    # ids 1,2,3 → Closed/No issue found/Rejected → is_closed=True
+    # id 4 → In progress → is_closed=False
+    assert rows == [(1, True), (2, True), (3, True), (4, False)]
