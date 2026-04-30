@@ -1,0 +1,40 @@
+# Local stack: postgres + extractor.
+# Postgres is exposed on host port 5433 so you can `psql -h localhost -p 5433`
+# from the host without colliding with any host-side postgres on 5432.
+# Inside the docker network the extractor talks to it as `postgres:5432`.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  extractor:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # Override host/port from .env — inside the network we want the service name, not localhost.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      REQUESTS_CA_BUNDLE: /cert/bundle.pem
+    volumes:
+      - ./.cert:/cert:ro
+
+volumes:
+  pgdata:

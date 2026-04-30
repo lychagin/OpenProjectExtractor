@@ -6,6 +6,7 @@ can decide what to do with them (DB upsert, JSON dump, etc.).
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Iterator
 
 import requests
@@ -21,9 +22,19 @@ load_dotenv()
 
 OPENPROJECT_URL = os.getenv('OPENPROJECT_URL', 'https://projects-customdev.wone-it.ru')
 PROJECT_IDENTIFIER = os.getenv('PROJECT_IDENTIFIER', 'dom-zhkkh')
-API_TOKEN = os.getenv('OPENPROJECT_API_TOKEN') or os.getenv('OPENPROJECTTOKEN')
 DEFAULT_PAGE_SIZE = 100
 BUG_TYPE_NAME = os.getenv('BUG_TYPE_NAME', 'Bug')
+
+
+def _load_token() -> str | None:
+    # Prefer *_FILE (docker secrets / k8s mount); fall back to env. Postgres image uses the same pattern.
+    for file_env in ('OPENPROJECTTOKEN_FILE', 'OPENPROJECT_API_TOKEN_FILE'):
+        if path := os.getenv(file_env):
+            return Path(path).read_text(encoding='utf-8').strip()
+    return os.getenv('OPENPROJECT_API_TOKEN') or os.getenv('OPENPROJECTTOKEN')
+
+
+API_TOKEN = _load_token()
 
 
 def get_api_auth():
