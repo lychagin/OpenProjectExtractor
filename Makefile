@@ -1,4 +1,4 @@
-.PHONY: install run test check clean show-bug
+.PHONY: install test test-integration dry-run run-once show-bug up down logs once psql
 
 PYTHON := $(if $(wildcard .venv/bin/python),.venv/bin/python,python)
 PIP := $(if $(wildcard .venv/bin/pip),.venv/bin/pip,pip)
@@ -9,39 +9,40 @@ ifneq ($(CA_BUNDLE),)
 export REQUESTS_CA_BUNDLE := $(abspath $(CA_BUNDLE))
 endif
 
+# --- Host-side (uses .venv) -------------------------------------------------
+
 install:
 	$(PIP) install -r requirements.txt
 
-run:
-	$(PYTHON) -m src.extractor
-
 test:
 	$(PYTHON) -m pytest tests/ -v
+
+test-integration:
+	$(PYTHON) -m pytest tests/ -v --integration
+
+dry-run:
+	$(PYTHON) -m src.main --dry-run
+
+run-once:
+	$(PYTHON) -m src.main --once
 
 show-bug:
 	@if [ -z "$(ID)" ]; then echo "usage: make show-bug ID=<work_package_id>"; exit 2; fi
 	@$(PYTHON) -m src.show_bug $(ID)
 
-check:
-	@echo "Checking output directory..."
-	@test -d output && echo "Output directory exists" || mkdir -p output
-	@echo "Checking for latest CSV file..."
-	@latest=$$(ls -t output/res-*.csv 2>/dev/null | head -1) && \
-		if [ -z "$$latest" ]; then \
-			echo "No CSV files found in output/"; \
-			exit 1; \
-		else \
-			echo "Latest output: $$latest"; \
-			lines=$$(wc -l < "$$latest"); \
-			echo "Lines in file: $$lines"; \
-			if [ "$$lines" -lt 2 ]; then \
-				echo "ERROR: CSV file has no data rows"; \
-				exit 1; \
-			else \
-				echo "Validation passed: $$lines lines (including header)"; \
-			fi \
-		fi
+# --- docker compose stack ---------------------------------------------------
 
-clean:
-	rm -rf output/res-*.csv
-	@echo "Cleaned output files"
+up:
+	docker compose up -d
+
+down:
+	docker compose down
+
+logs:
+	docker compose logs -f extractor
+
+once:
+	docker compose run --rm extractor --once
+
+psql:
+	docker compose exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
