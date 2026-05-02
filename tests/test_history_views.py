@@ -23,3 +23,17 @@ def test_make_history_snapshot_creates_bug_and_history_row(db_conn, make_history
         assert cur.fetchone()[0] == 1
         cur.execute("SELECT count(*) FROM bug_history WHERE bug_id = 1")
         assert cur.fetchone()[0] == 1
+
+
+def test_is_status_closed_function(db_conn):
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT is_status_closed('Closed')")
+        assert cur.fetchone()[0] is True
+        cur.execute("SELECT is_status_closed('No issue found')")
+        assert cur.fetchone()[0] is True
+        cur.execute("SELECT is_status_closed('Rejected')")
+        assert cur.fetchone()[0] is True
+        cur.execute("SELECT is_status_closed('In progress')")
+        assert cur.fetchone()[0] is False
+        cur.execute("SELECT is_status_closed('Tested')")
+        assert cur.fetchone()[0] is False  # narrow definition — Tested is NOT closed
