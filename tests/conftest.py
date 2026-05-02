@@ -1,8 +1,10 @@
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
+from psycopg.types.json import Jsonb
 
 # Make modules under src/ importable as top-level (matches the pre-existing
 # tests/test_client.py style — they `import client`).
@@ -57,9 +59,6 @@ def db_conn():
         conn.close()
 
 
-from datetime import datetime
-
-
 @pytest.fixture
 def make_history_snapshot(db_conn):
     """Insert a synthetic bug + bug_history row at a controlled seen_at and status.
@@ -68,9 +67,8 @@ def make_history_snapshot(db_conn):
     with minimal columns; status_name on the bug row is updated to match the
     latest snapshot status (so v_bugs reflects the same view of the world).
     """
-    from psycopg.types.json import Jsonb
-
     def _insert(bug_id: int, seen_at: datetime, status_name: str, lock_version: int = 1):
+        assert seen_at.tzinfo is not None, "seen_at must be timezone-aware (use datetime(..., tzinfo=timezone.utc))"
         snapshot = {
             "id": bug_id,
             "subject": f"Bug {bug_id}",
