@@ -55,3 +55,42 @@ def db_conn():
     finally:
         conn.rollback()
         conn.close()
+
+
+from datetime import datetime
+
+
+@pytest.fixture
+def make_history_snapshot(db_conn):
+    """Insert a synthetic bug + bug_history row at a controlled seen_at and status.
+
+    Use to set up history scenarios for trend-view tests. The bug row is created
+    with minimal columns; status_name on the bug row is updated to match the
+    latest snapshot status (so v_bugs reflects the same view of the world).
+    """
+    from psycopg.types.json import Jsonb
+
+    def _insert(bug_id: int, seen_at: datetime, status_name: str, lock_version: int = 1):
+        snapshot = {
+            "id": bug_id,
+            "subject": f"Bug {bug_id}",
+            "lockVersion": lock_version,
+            "createdAt": "2026-01-01T00:00:00Z",
+            "updatedAt": "2026-01-01T00:00:00Z",
+            "_links": {"status": {"href": "/api/v3/statuses/0", "title": status_name}},
+        }
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO bugs (id, subject, raw, status_name, lock_version) "
+                "VALUES (%s, %s, %s, %s, %s) "
+                "ON CONFLICT (id) DO UPDATE "
+                "SET status_name = EXCLUDED.status_name, lock_version = EXCLUDED.lock_version",
+                (bug_id, f"Bug {bug_id}", Jsonb(snapshot), status_name, lock_version),
+            )
+            cur.execute(
+                "INSERT INTO bug_history (bug_id, lock_version, seen_at, snapshot) "
+                "VALUES (%s, %s, %s, %s)",
+                (bug_id, lock_version, seen_at, Jsonb(snapshot)),
+            )
+
+    return _insert

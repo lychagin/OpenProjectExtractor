@@ -1,0 +1,2 @@
+-- History trend views consumed by the DataLens "Bug trends" dashboard.
+-- Idempotent (CREATE OR REPLACE everywhere).
