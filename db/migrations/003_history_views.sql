@@ -17,3 +17,16 @@ WHERE deleted_at IS NULL;
 
 COMMENT ON VIEW v_bugs IS
     'Current bug state for DataLens: hides soft-deletes, adds is_closed via is_status_closed().';
+
+-- 3 State-at-time: for each bug, the most recent snapshot whose seen_at <= t.
+CREATE OR REPLACE FUNCTION bug_state_at(t timestamptz)
+RETURNS TABLE (bug_id integer, status_name text, is_closed boolean)
+LANGUAGE sql STABLE AS $$
+    SELECT DISTINCT ON (bh.bug_id)
+        bh.bug_id,
+        (bh.snapshot->'_links'->'status'->>'title')::text,
+        is_status_closed((bh.snapshot->'_links'->'status'->>'title')::text)
+    FROM bug_history bh
+    WHERE bh.seen_at <= t
+    ORDER BY bh.bug_id, bh.seen_at DESC;
+$$;
