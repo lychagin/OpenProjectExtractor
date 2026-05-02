@@ -30,3 +30,24 @@ LANGUAGE sql STABLE AS $$
     WHERE bh.seen_at <= t
     ORDER BY bh.bug_id, bh.seen_at DESC;
 $$;
+
+-- 4.1 Weekly grid (Monday 00:00 UTC) from earliest history to latest snapshot
+-- (or now, whichever is later) so future-dated test data is always covered.
+CREATE OR REPLACE VIEW v_weeks AS
+SELECT generate_series(
+    date_trunc('week', (SELECT min(seen_at) FROM bug_history)),
+    GREATEST(
+        date_trunc('week', now()),
+        date_trunc('week', (SELECT max(seen_at) FROM bug_history))
+    ),
+    interval '1 week'
+)::timestamptz AS week_start;
+
+-- 4.2 For each (week, status) pair: how many bugs were in that status as of week_start.
+CREATE OR REPLACE VIEW v_bug_status_weekly AS
+SELECT w.week_start,
+       s.status_name,
+       count(*)::int AS bug_count
+FROM v_weeks w
+CROSS JOIN LATERAL bug_state_at(w.week_start) s
+GROUP BY w.week_start, s.status_name;

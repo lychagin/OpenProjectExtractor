@@ -75,3 +75,32 @@ def test_bug_state_at_multiple_bugs_independent(db_conn, make_history_snapshot):
         )
         rows = cur.fetchall()
     assert rows == [(1, "New"), (2, "Closed")]
+
+
+def test_v_bug_status_weekly_groups_correctly(db_conn, make_history_snapshot):
+    make_history_snapshot(bug_id=1, seen_at=W1, status_name="New")
+    make_history_snapshot(bug_id=2, seen_at=W1, status_name="Closed")
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT status_name, bug_count FROM v_bug_status_weekly "
+            "WHERE week_start = %s ORDER BY status_name",
+            (W1,),
+        )
+        rows = cur.fetchall()
+    assert rows == [("Closed", 1), ("New", 1)]
+
+
+def test_v_bug_status_weekly_handles_transition(db_conn, make_history_snapshot):
+    # bug 1 in New on W1, then Closed on W2 — by W2 it must NOT show under 'New'
+    make_history_snapshot(bug_id=1, seen_at=W1, status_name="New", lock_version=1)
+    make_history_snapshot(bug_id=1, seen_at=W2, status_name="Closed", lock_version=2)
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT week_start, status_name, bug_count FROM v_bug_status_weekly "
+            "WHERE week_start IN (%s, %s) ORDER BY week_start, status_name",
+            (W1, W2),
+        )
+        rows = cur.fetchall()
+    assert rows == [(W1, "New", 1), (W2, "Closed", 1)]
