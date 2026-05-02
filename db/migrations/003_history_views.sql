@@ -31,8 +31,11 @@ LANGUAGE sql STABLE AS $$
     ORDER BY bh.bug_id, bh.seen_at DESC;
 $$;
 
--- 4.1 Weekly grid (Monday 00:00 UTC) from earliest history to latest snapshot
--- (or now, whichever is later) so future-dated test data is always covered.
+-- 4.1 Weekly grid (Monday 00:00 UTC).
+-- Upper bound: GREATEST(now, max(seen_at)) rather than plain now() for two reasons:
+--   (a) integration-test fixtures use forward-dated synthetic timestamps (W2-W4 in 2026-05).
+--   (b) any seen_at slightly ahead of wall-clock (clock skew, bulk import) is handled
+--       gracefully: an extra week appears with the bugs' current status, which is correct.
 CREATE OR REPLACE VIEW v_weeks AS
 SELECT generate_series(
     date_trunc('week', (SELECT min(seen_at) FROM bug_history)),
@@ -47,7 +50,7 @@ SELECT generate_series(
 CREATE OR REPLACE VIEW v_bug_status_weekly AS
 SELECT w.week_start,
        s.status_name,
-       count(*)::int AS bug_count
+       count(*)::int AS bug_count   -- bigint -> int4; safe: no bucket will hold >2B bugs
 FROM v_weeks w
 CROSS JOIN LATERAL bug_state_at(w.week_start) s
 GROUP BY w.week_start, s.status_name;
