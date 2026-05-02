@@ -85,3 +85,19 @@ closes AS (
 SELECT week_start, event_type, count(*)::int AS event_count
 FROM (SELECT * FROM opens UNION ALL SELECT * FROM closes) all_events
 GROUP BY week_start, event_type;
+
+-- 6 Per-bug, per-status interval durations (in days). Open intervals (last snapshot per
+-- bug — bug still in that status) are excluded: no end timestamp is known.
+-- DataLens aggregates this as avg(days_in_status) GROUP BY status_name.
+CREATE OR REPLACE VIEW v_bug_time_in_status AS
+WITH transitions AS (
+    SELECT bh.bug_id,
+           bh.seen_at,
+           (bh.snapshot->'_links'->'status'->>'title')::text AS status_name,
+           lead(bh.seen_at) OVER (PARTITION BY bh.bug_id ORDER BY bh.seen_at) AS next_seen_at
+    FROM bug_history bh
+)
+SELECT status_name,
+       extract(epoch FROM (next_seen_at - seen_at)) / 86400.0 AS days_in_status
+FROM transitions
+WHERE next_seen_at IS NOT NULL;

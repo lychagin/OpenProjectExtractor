@@ -163,3 +163,27 @@ def test_v_bug_throughput_consecutive_closed_snapshots_count_once(db_conn, make_
 
     assert ("closed", 1) in _throughput_rows(db_conn, W2)
     assert not any(et == "closed" for et, _ in _throughput_rows(db_conn, W3))
+
+
+def test_v_bug_time_in_status_basic_duration(db_conn, make_history_snapshot):
+    make_history_snapshot(bug_id=1, seen_at=W1, status_name="New", lock_version=1)
+    make_history_snapshot(bug_id=1, seen_at=W1 + timedelta(days=3),
+                          status_name="In progress", lock_version=2)
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT status_name, days_in_status FROM v_bug_time_in_status "
+            "WHERE status_name = 'New'"
+        )
+        rows = cur.fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == "New"
+    assert rows[0][1] == pytest.approx(3.0, abs=1e-6)
+
+
+def test_v_bug_time_in_status_excludes_open_intervals(db_conn, make_history_snapshot):
+    # Single snapshot — bug currently in 'New', no transition out yet, must not appear.
+    make_history_snapshot(bug_id=1, seen_at=W1, status_name="New")
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM v_bug_time_in_status")
+        assert cur.fetchone()[0] == 0
