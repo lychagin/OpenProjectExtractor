@@ -152,3 +152,14 @@ def test_v_bug_throughput_initially_closed_counts_as_close(db_conn, make_history
     rows = _throughput_rows(db_conn, W1)
     assert ("opened", 1) in rows
     assert ("closed", 1) in rows
+
+
+def test_v_bug_throughput_consecutive_closed_snapshots_count_once(db_conn, make_history_snapshot):
+    # Bug closes at W2; then a metadata-only update arrives at W3 still in Closed
+    # (lock_version bumped, status unchanged). Only ONE close event must be counted.
+    make_history_snapshot(bug_id=1, seen_at=W1, status_name="New",    lock_version=1)
+    make_history_snapshot(bug_id=1, seen_at=W2, status_name="Closed", lock_version=2)
+    make_history_snapshot(bug_id=1, seen_at=W3, status_name="Closed", lock_version=3)
+
+    assert ("closed", 1) in _throughput_rows(db_conn, W2)
+    assert not any(et == "closed" for et, _ in _throughput_rows(db_conn, W3))
