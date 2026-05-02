@@ -187,3 +187,24 @@ def test_v_bug_time_in_status_excludes_open_intervals(db_conn, make_history_snap
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM v_bug_time_in_status")
         assert cur.fetchone()[0] == 0
+
+
+def test_v_bug_time_in_status_multi_bug_independent(db_conn, make_history_snapshot):
+    # Bug 1: 3 days in New. Bug 2: 7 days in New.
+    # If PARTITION BY bug_id were dropped/wrong, lead() would cross bugs and produce garbage.
+    make_history_snapshot(bug_id=1, seen_at=W1, status_name="New",         lock_version=1)
+    make_history_snapshot(bug_id=1, seen_at=W1 + timedelta(days=3),
+                          status_name="In progress", lock_version=2)
+    make_history_snapshot(bug_id=2, seen_at=W1, status_name="New",         lock_version=1)
+    make_history_snapshot(bug_id=2, seen_at=W1 + timedelta(days=7),
+                          status_name="In progress", lock_version=2)
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT days_in_status FROM v_bug_time_in_status "
+            "WHERE status_name = 'New' ORDER BY days_in_status"
+        )
+        rows = [r[0] for r in cur.fetchall()]
+    assert len(rows) == 2
+    assert rows[0] == pytest.approx(3.0, abs=1e-6)
+    assert rows[1] == pytest.approx(7.0, abs=1e-6)
