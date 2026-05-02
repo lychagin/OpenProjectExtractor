@@ -62,3 +62,16 @@ def test_bug_state_at_empty_history(db_conn):
     with db_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM bug_state_at(now())")
         assert cur.fetchone()[0] == 0
+
+
+def test_bug_state_at_multiple_bugs_independent(db_conn, make_history_snapshot):
+    make_history_snapshot(bug_id=1, seen_at=W1, status_name="New",    lock_version=1)
+    make_history_snapshot(bug_id=2, seen_at=W1, status_name="Closed", lock_version=1)
+    make_history_snapshot(bug_id=1, seen_at=W2, status_name="Closed", lock_version=2)
+
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT bug_id, status_name FROM bug_state_at(%s) ORDER BY bug_id", (W1,),
+        )
+        rows = cur.fetchall()
+    assert rows == [(1, "New"), (2, "Closed")]
