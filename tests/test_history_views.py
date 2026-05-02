@@ -104,3 +104,51 @@ def test_v_bug_status_weekly_handles_transition(db_conn, make_history_snapshot):
         )
         rows = cur.fetchall()
     assert rows == [(W1, "New", 1), (W2, "Closed", 1)]
+
+
+def _throughput_rows(db_conn, week):
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "SELECT event_type, event_count FROM v_bug_throughput_weekly "
+            "WHERE week_start = %s ORDER BY event_type",
+            (week,),
+        )
+        return cur.fetchall()
+
+
+def test_v_bug_throughput_open_count(db_conn, make_history_snapshot):
+    # Two bugs created in W1 (only one snapshot each, both 'New').
+    make_history_snapshot(bug_id=1, seen_at=W1, status_name="New")
+    make_history_snapshot(bug_id=2, seen_at=W1, status_name="New")
+
+    rows = _throughput_rows(db_conn, W1)
+    assert ("opened", 2) in rows
+    assert not any(et == "closed" for et, _ in rows)
+
+
+def test_v_bug_throughput_close_count_basic(db_conn, make_history_snapshot):
+    make_history_snapshot(bug_id=1, seen_at=W1, status_name="New", lock_version=1)
+    make_history_snapshot(bug_id=1, seen_at=W2, status_name="Closed", lock_version=2)
+
+    assert ("opened", 1) in _throughput_rows(db_conn, W1)
+    assert ("closed", 1) in _throughput_rows(db_conn, W2)
+
+
+def test_v_bug_throughput_reopen_double_counts(db_conn, make_history_snapshot):
+    # New(W1) → Closed(W2) → In progress(W3) → Closed(W4): two close events expected.
+    make_history_snapshot(bug_id=1, seen_at=W1, status_name="New",         lock_version=1)
+    make_history_snapshot(bug_id=1, seen_at=W2, status_name="Closed",      lock_version=2)
+    make_history_snapshot(bug_id=1, seen_at=W3, status_name="In progress", lock_version=3)
+    make_history_snapshot(bug_id=1, seen_at=W4, status_name="Closed",      lock_version=4)
+
+    assert ("opened", 1) in _throughput_rows(db_conn, W1)
+    assert ("closed", 1) in _throughput_rows(db_conn, W2)
+    assert ("closed", 1) in _throughput_rows(db_conn, W4)
+
+
+def test_v_bug_throughput_initially_closed_counts_as_close(db_conn, make_history_snapshot):
+    # Bug exists with a single snapshot already in Closed — must count as both open AND close in W1.
+    make_history_snapshot(bug_id=1, seen_at=W1, status_name="Closed")
+    rows = _throughput_rows(db_conn, W1)
+    assert ("opened", 1) in rows
+    assert ("closed", 1) in rows

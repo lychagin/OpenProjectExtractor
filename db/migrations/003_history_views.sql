@@ -54,3 +54,34 @@ SELECT w.week_start,
 FROM v_weeks w
 CROSS JOIN LATERAL bug_state_at(w.week_start) s
 GROUP BY w.week_start, s.status_name;
+
+-- 5 Weekly opens (first snapshot of a bug) and closes (transition into is_closed=true).
+-- Reopens count: every close event is independent. Bugs whose first snapshot is already
+-- closed produce both an open and a close event in that same week (prev_is_closed IS NULL).
+CREATE OR REPLACE VIEW v_bug_throughput_weekly AS
+WITH events AS (
+    SELECT
+        bh.bug_id,
+        bh.seen_at,
+        is_status_closed((bh.snapshot->'_links'->'status'->>'title')::text) AS is_closed,
+        lag(is_status_closed((bh.snapshot->'_links'->'status'->>'title')::text))
+            OVER (PARTITION BY bh.bug_id ORDER BY bh.seen_at) AS prev_is_closed,
+        row_number() OVER (PARTITION BY bh.bug_id ORDER BY bh.seen_at) AS rn
+    FROM bug_history bh
+),
+opens AS (
+    SELECT date_trunc('week', seen_at)::timestamptz AS week_start,
+           'opened'::text AS event_type
+    FROM events
+    WHERE rn = 1
+),
+closes AS (
+    SELECT date_trunc('week', seen_at)::timestamptz AS week_start,
+           'closed'::text AS event_type
+    FROM events
+    WHERE is_closed = true
+      AND (prev_is_closed IS NULL OR prev_is_closed = false)
+)
+SELECT week_start, event_type, count(*)::int AS event_count
+FROM (SELECT * FROM opens UNION ALL SELECT * FROM closes) all_events
+GROUP BY week_start, event_type;
