@@ -1,0 +1,17 @@
+# Production override. Layered on top of docker-compose.yml +
+# docker-compose.datalens.yml. Replaces the dev `build: .` with the image
+# published to ghcr.io by .github/workflows/build-image.yml.
+#
+# Bring up:
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.datalens.yml \
+#                  -f docker-compose.prod.yml \
+#                  up -d
+#
+# (Or `make prod-up`.)
+
+services:
+  extractor:
+    build: !reset null
+    image: ghcr.io/${GHCR_OWNER}/openproject-extractor:latest
+    pull_policy: always

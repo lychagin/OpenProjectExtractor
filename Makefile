@@ -1,4 +1,4 @@
-.PHONY: install test test-integration dry-run run-once show-bug up down logs once psql datalens-up datalens-down datalens-logs
+.PHONY: install test test-integration dry-run run-once show-bug up down logs once psql datalens-up datalens-down datalens-logs prod-up prod-down prod-logs
 
 # Compose files used together for the full stack (extractor + Postgres + DataLens).
 COMPOSE_FULL := -f docker-compose.yml -f docker-compose.datalens.yml
@@ -63,3 +63,15 @@ datalens-down:
 
 datalens-logs:
 	docker compose $(COMPOSE_FULL) logs -f ui ui-api us
+
+# --- Production stack (extractor pulled from ghcr.io + DataLens + nginx) ----
+COMPOSE_PROD := -f docker-compose.yml -f docker-compose.datalens.yml -f docker-compose.prod.yml
+
+prod-up:
+	docker compose $(COMPOSE_PROD) up -d
+
+prod-down:
+	docker compose $(COMPOSE_PROD) down
+
+prod-logs:
+	docker compose $(COMPOSE_PROD) logs -f extractor nginx
