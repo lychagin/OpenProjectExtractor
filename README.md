@@ -164,3 +164,98 @@ scripts/vendor-datalens.sh  Re-vendor DataLens compose from upstream.
 - The `type` filter in the work-packages endpoint takes **type IDs**, not names. We resolve `Bug` → id via `/api/v3/projects/<id>/types` on each cycle.
 - Pagination uses `offset`/`pageSize`/`total` at the response root, not `_meta.count` and `_links.next`.
 - Field/relation names like `status`, `assignee`, `priority` live in `_links.<rel>.title` (HAL), not as scalar fields. We denormalize them into columns on `bugs` so DataLens can chart them without parsing JSON.
+
+## Production deploy
+
+The repo ships everything needed to run this stack 24/7 on a single Ubuntu 24.04 LTS VM (8 GB RAM, 50 GB disk, 2 vCPU).
+
+### One-time setup
+
+On a fresh VM:
+
+```bash
+sudo bash scripts/provision-vm.sh
+```
+
+This installs Docker, sets up the `extractor` user, configures `ufw` (only 22/80/443 open), clones the repo into `/srv/extractor`, and writes the cron jobs. The script then prints a manual checklist for the steps it cannot do automatically:
+
+1. **Copy secrets** (`scp .env extractor@vm:/srv/extractor/.env` and `scp -r .cert extractor@vm:/srv/extractor/`).
+2. **Edit `/srv/extractor/.env`** on the VM and set `GHCR_OWNER`, `SERVER_NAME`, and the other secrets.
+3. **`docker login ghcr.io`** with a GitHub Personal Access Token (`read:packages` scope).
+4. **`certbot certonly --standalone`** to obtain the TLS certificate.
+5. **`make prod-up`** to bring up the full stack.
+6. **Change DataLens `admin/admin`** via the UI immediately on first login.
+
+### How the deploy pipeline works
+
+```
+git push main → GH Actions builds image → ghcr.io (private) ← cron pulls every 5 min
+```
+
+`.github/workflows/build-image.yml` triggers on every push to `main` (or manual dispatch) and pushes two tags: `:latest` and `:<commit-sha>`. On the VM, a cron entry under `/etc/cron.d/openproject-extractor` runs every 5 minutes:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.datalens.yml -f docker-compose.prod.yml \
+    pull --quiet extractor && \
+docker compose ... up -d extractor
+```
+
+`pull --quiet` only fetches the manifest (~1 KB) when the image hasn't changed. `up -d` only restarts the container when the local image SHA differs from what's running.
+
+End-to-end push-to-prod latency: 1–2 minutes (GH Actions build) + up to 5 minutes (cron poll) = **≤7 minutes**.
+
+## Operations runbook
+
+### Inspect status
+
+```bash
+# On the VM as extractor user
+docker compose -f docker-compose.yml -f docker-compose.datalens.yml -f docker-compose.prod.yml ps
+docker compose ... logs --tail=50 extractor      # last extractor cycles
+docker compose ... logs --tail=50 nginx          # request log
+tail -f /srv/extractor/cron.log                  # cron-pull activity
+tail -f /srv/backups/backup.log                  # last backup run
+```
+
+### Roll back to a previous image
+
+If a bad commit shipped to `:latest`:
+
+```bash
+# On the VM as extractor user
+docker pull ghcr.io/<owner>/openproject-extractor:<previous_sha>
+docker tag  ghcr.io/<owner>/openproject-extractor:<previous_sha> \
+            ghcr.io/<owner>/openproject-extractor:latest
+docker compose -f docker-compose.yml -f docker-compose.datalens.yml -f docker-compose.prod.yml \
+    up -d extractor
+```
+
+Then push a fix to `main` — the next successful Actions build overwrites `:latest` and the rollback resolves automatically.
+
+### Restore Postgres from backup
+
+```bash
+# On the VM as extractor user
+gunzip -c /srv/backups/daily/bugs-YYYY-MM-DD.sql.gz | \
+    docker compose ... exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+```
+
+Likewise for DataLens (use `datalens-postgres` and `pg_restore` — the DataLens dump is from `pg_dumpall`, restore with `psql`).
+
+### TLS certificate renewal
+
+`certbot.timer` (systemd) auto-renews ~30 days before expiry. After renewal, reload nginx:
+
+```bash
+docker compose ... exec nginx nginx -s reload
+```
+
+(Or set up a `certbot --deploy-hook` to do this automatically — see `man certbot`.)
+
+### Manual deploy without waiting for cron
+
+```bash
+make prod-up         # equivalent to: docker compose ... up -d
+```
+
+Pulls and restarts everything that has changed. Useful right after a deploy to skip the up-to-5-minute wait.
