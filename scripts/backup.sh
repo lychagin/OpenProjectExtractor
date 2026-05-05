@@ -30,6 +30,10 @@ if [ -f "$REPO_ROOT/.env" ]; then
     set +a
 fi
 
+# Defaults match .env.example so the script doesn't die under `set -u` if .env is missing.
+POSTGRES_USER="${POSTGRES_USER:-extractor}"
+POSTGRES_DB="${POSTGRES_DB:-extractor}"
+
 DATE=$(date +%Y-%m-%d)
 DOW=$(date +%u)   # 1=Mon ... 7=Sun
 
