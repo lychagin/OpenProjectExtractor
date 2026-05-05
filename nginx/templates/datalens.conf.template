@@ -5,7 +5,8 @@
 # the entrypoint's default ENVSUBST_TEMPLATE_DIR but a default vars filter).
 
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
+    http2 on;
     server_name ${SERVER_NAME};
 
     ssl_certificate     /etc/letsencrypt/live/${SERVER_NAME}/fullchain.pem;
@@ -14,6 +15,10 @@ server {
     ssl_ciphers HIGH:!aNULL:!MD5;
 
     client_max_body_size 50M;
+
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
 
     location / {
         proxy_pass http://ui:8080;

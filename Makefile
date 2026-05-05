@@ -90,6 +90,7 @@ nginx-check:
 	    -e SERVER_NAME=localhost \
 	    -v $$PWD/nginx/templates:/etc/nginx/templates:ro \
 	    -v $$TMPDIR:/etc/letsencrypt:ro \
+	    -v /dev/null:/etc/nginx/conf.d/default.conf:ro \
 	    nginx:alpine nginx -t && \
 	rm -rf $$TMPDIR && \
 	echo "nginx config OK"
