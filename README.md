@@ -240,17 +240,18 @@ gunzip -c /srv/backups/daily/bugs-YYYY-MM-DD.sql.gz | \
     docker compose ... exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 ```
 
-Likewise for DataLens (use `datalens-postgres` and `pg_restore` — the DataLens dump is from `pg_dumpall`, restore with `psql`).
+Likewise for DataLens — the dump is from `pg_dumpall` (plain SQL), so restore with `psql` against the `datalens-postgres` service in the same pipe pattern as above.
 
 ### TLS certificate renewal
 
-`certbot.timer` (systemd) auto-renews ~30 days before expiry. After renewal, reload nginx:
+`certbot.timer` (systemd) auto-renews ~30 days before expiry. `provision-vm.sh` installs a deploy hook at `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh` that reloads nginx inside its container after each renewal — no manual action needed.
+
+To force an immediate nginx reload (e.g. after manually copying a cert):
 
 ```bash
-docker compose ... exec nginx nginx -s reload
+docker compose -f docker-compose.yml -f docker-compose.datalens.yml -f docker-compose.prod.yml \
+    exec nginx nginx -s reload
 ```
-
-(Or set up a `certbot --deploy-hook` to do this automatically — see `man certbot`.)
 
 ### Manual deploy without waiting for cron
 
@@ -259,3 +260,11 @@ make prod-up         # equivalent to: docker compose ... up -d
 ```
 
 Pulls and restarts everything that has changed. Useful right after a deploy to skip the up-to-5-minute wait.
+
+### Stop the stack (e.g., for maintenance)
+
+```bash
+make prod-down
+```
+
+Stops all services. The named Postgres volumes (extractor's `pgdata`, DataLens's `pg-us-db`) survive — bring everything back with `make prod-up`.
