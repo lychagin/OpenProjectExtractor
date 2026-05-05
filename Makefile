@@ -1,4 +1,4 @@
-.PHONY: install test test-integration dry-run run-once show-bug up down logs once psql datalens-up datalens-down datalens-logs prod-up prod-down prod-logs
+.PHONY: install test test-integration dry-run run-once show-bug up down logs once psql datalens-up datalens-down datalens-logs prod-up prod-down prod-logs nginx-check
 
 # Compose files used together for the full stack (extractor + Postgres + DataLens).
 COMPOSE_FULL := -f docker-compose.yml -f docker-compose.datalens.yml
@@ -75,3 +75,21 @@ prod-down:
 
 prod-logs:
 	docker compose $(COMPOSE_PROD) logs -f extractor nginx
+
+# Smoke-test the nginx template + envsubst rendering with a self-signed cert,
+# without needing a real domain or Let's Encrypt. Useful before deploying.
+nginx-check:
+	@TMPDIR=$$(mktemp -d) && \
+	mkdir -p $$TMPDIR/live/localhost && \
+	openssl req -x509 -nodes -newkey rsa:2048 \
+	    -keyout $$TMPDIR/live/localhost/privkey.pem \
+	    -out    $$TMPDIR/live/localhost/fullchain.pem \
+	    -subj "/CN=localhost" -days 1 2>/dev/null && \
+	docker run --rm \
+	    --add-host ui:127.0.0.1 \
+	    -e SERVER_NAME=localhost \
+	    -v $$PWD/nginx/templates:/etc/nginx/templates:ro \
+	    -v $$TMPDIR:/etc/letsencrypt:ro \
+	    nginx:alpine nginx -t && \
+	rm -rf $$TMPDIR && \
+	echo "nginx config OK"

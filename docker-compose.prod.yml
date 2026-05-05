@@ -15,3 +15,17 @@ services:
     build: !reset null
     image: ghcr.io/${GHCR_OWNER}/openproject-extractor:latest
     pull_policy: always
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SERVER_NAME: ${SERVER_NAME}
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - ui
