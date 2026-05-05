@@ -126,7 +126,7 @@ When you drop an integer column (`id`, `bug_count`, `event_count`, etc.) into th
 
 ```bash
 make test               # 9 unit tests, fast, no DB needed
-make test-integration   # +8 integration tests, requires `make up` first
+make test-integration   # +24 integration tests (8 db + 16 history-views), requires `make up` first
 ```
 
 Integration tests run all DML inside a single transaction that gets rolled back at teardown — safe to run against a populated production DB without losing data.
