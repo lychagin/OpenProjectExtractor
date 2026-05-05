@@ -102,6 +102,26 @@ Once the connection is configured, build a dataset and a dashboard:
 
 The dashboard config lives in DataLens's own Postgres (the `datalens-postgres` container, in `pg-us-db`), so it survives `make datalens-down` / `up` cycles. To reset, use `docker compose -f docker-compose.yml -f docker-compose.datalens.yml down -v` (the `-v` drops the named volume).
 
+### Bug trends dashboard
+
+A second dashboard fed by SQL views over `bug_history`. Build it after `Bugs overview` is up.
+
+1. *Datasets* → *+ New* → connection `extractor-bugs` → drag in each of these views, one dataset each:
+   - `v_bug_status_weekly` — save as `bug_status_weekly`
+   - `v_bug_throughput_weekly` — save as `bug_throughput_weekly`
+   - `v_bug_time_in_status` — save as `bug_time_in_status`
+2. Build three charts:
+   - **Bug status mix over time** — stacked area, X = `week_start`, Y = sum(`bug_count`), color = `status_name`. Pin closed statuses to the bottom of the stack for legibility.
+   - **Bug throughput per week** — line, X = `week_start`, Y = sum(`event_count`), color = `event_type` (two series: `opened`, `closed`).
+   - **Average time in status** — horizontal bar, Y = `status_name`, X = avg(`days_in_status`), sort desc, measure filter `count([days_in_status]) > 5`.
+3. *Dashboards* → *+ New* → drop charts onto the grid, suggested layout: status mix full-width row 1, throughput full-width row 2, time-in-status (8 cols) + a text widget with the legend (4 cols) in row 3. Save as `Bug trends`.
+
+Caveat: history is collected forward from when the extractor first ran (~2026-04-30). Trends before that date are not reconstructable. Reopens (Closed → In progress → Closed) count as separate close events. The closed-set is `Closed`, `No issue found`, `Rejected` (per `is_status_closed()` in the DB, used by `v_bugs.is_closed` too).
+
+#### Gotcha: DataLens auto-aggregates integers as `sum`
+
+When you drop an integer column (`id`, `bug_count`, `event_count`, etc.) into the Y axis, DataLens defaults the aggregation to `sum`. For a "how many bugs?" chart that's wrong — `sum([id])` is the sum of primary keys, not a count of rows. Use `count([id])` instead, either by changing the field's aggregation function inline (click the Y pill → switch from `Sum` to `Count`) or by making a calculated measure `bug_count = COUNT([id])` in the dataset.
+
 ## Tests
 
 ```bash
