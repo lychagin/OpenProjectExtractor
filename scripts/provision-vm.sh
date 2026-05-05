@@ -19,6 +19,11 @@ if [ "$(id -u)" != "0" ]; then
     exit 1
 fi
 
+# Run apt non-interactively (Ubuntu 24.04 ships needrestart, which would
+# otherwise intercept apt-get upgrade and hang on the service-restart dialog).
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+
 REPO_URL="${REPO_URL:-https://github.com/lychagin/OpenProjectExtractor.git}"
 EXTRACTOR_HOME=/srv/extractor
 BACKUP_DIR=/srv/backups
@@ -69,11 +74,24 @@ ufw --force enable
 
 echo "==> repo clone"
 if [ ! -d "$EXTRACTOR_HOME/.git" ]; then
-    sudo -u extractor -H git clone "$REPO_URL" "$EXTRACTOR_HOME"
+    # Disable git's credential prompts — fail fast if auth is needed.
+    if ! sudo -u extractor -H GIT_TERMINAL_PROMPT=0 \
+            git clone "$REPO_URL" "$EXTRACTOR_HOME" 2>&1; then
+        echo ""
+        echo "    git clone failed — likely a private repo without credentials."
+        echo "    Recover by either:"
+        echo "      (a) scp the repo from your laptop to $EXTRACTOR_HOME on the VM, OR"
+        echo "      (b) re-run with auth: REPO_URL=https://<PAT>@github.com/lychagin/OpenProjectExtractor.git \\"
+        echo "          sudo bash $0"
+        echo ""
+        echo "    Continuing — cron file and other infrastructure will still be set up."
+    fi
 else
     echo "    repo already cloned, fetching latest"
-    sudo -u extractor -H git -C "$EXTRACTOR_HOME" fetch --all --prune
-    sudo -u extractor -H git -C "$EXTRACTOR_HOME" pull --ff-only
+    sudo -u extractor -H git -C "$EXTRACTOR_HOME" fetch --all --prune || \
+        echo "    fetch failed (auth?), continuing"
+    sudo -u extractor -H git -C "$EXTRACTOR_HOME" pull --ff-only || \
+        echo "    pull failed (diverged or auth?), continuing"
 fi
 
 echo "==> cron entries (if not present)"
@@ -95,6 +113,28 @@ EOF
     echo "    wrote $CRON_FILE"
 else
     echo "    $CRON_FILE already present, leaving as-is"
+fi
+
+echo "==> certbot deploy hook for nginx reload"
+HOOK_FILE=/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+mkdir -p "$(dirname "$HOOK_FILE")"
+if [ ! -f "$HOOK_FILE" ]; then
+    cat > "$HOOK_FILE" <<'HOOK'
+#!/usr/bin/env bash
+# Reload nginx inside its docker container after certbot renews the cert.
+# Without this, nginx keeps serving the expired cert until manual reload.
+set -euo pipefail
+cd /srv/extractor
+sudo -u extractor docker compose \
+    -f docker-compose.yml \
+    -f docker-compose.datalens.yml \
+    -f docker-compose.prod.yml \
+    exec -T nginx nginx -s reload
+HOOK
+    chmod +x "$HOOK_FILE"
+    echo "    wrote $HOOK_FILE"
+else
+    echo "    $HOOK_FILE already present, leaving as-is"
 fi
 
 cat <<'EOF'
