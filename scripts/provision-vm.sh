@@ -124,8 +124,10 @@ if [ ! -f "$HOOK_FILE" ]; then
 # Reload nginx inside its docker container after certbot renews the cert.
 # Without this, nginx keeps serving the expired cert until manual reload.
 set -euo pipefail
+# Runs as root (certbot deploy hooks inherit root). Root can run docker
+# directly — no need for sudo -u extractor.
 cd /srv/extractor
-sudo -u extractor docker compose \
+docker compose \
     -f docker-compose.yml \
     -f docker-compose.datalens.yml \
     -f docker-compose.prod.yml \

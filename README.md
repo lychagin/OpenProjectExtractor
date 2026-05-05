@@ -183,7 +183,7 @@ This installs Docker, sets up the `extractor` user, configures `ufw` (only 22/80
 2. **Edit `/srv/extractor/.env`** on the VM and set `GHCR_OWNER`, `SERVER_NAME`, and the other secrets.
 3. **`docker login ghcr.io`** with a GitHub Personal Access Token (`read:packages` scope).
 4. **`certbot certonly --standalone`** to obtain the TLS certificate.
-5. **`make prod-up`** to bring up the full stack.
+5. **`cd /srv/extractor && make prod-up`** (as the `extractor` user) to bring up the full stack.
 6. **Change DataLens `admin/admin`** via the UI immediately on first login.
 
 ### How the deploy pipeline works
