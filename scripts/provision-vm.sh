@@ -38,7 +38,7 @@ apt-get upgrade -y
 echo "==> Base packages"
 apt-get install -y \
     curl ca-certificates gnupg lsb-release \
-    ufw fail2ban openssl
+    ufw fail2ban openssl make
 
 echo "==> Docker engine + compose plugin"
 if ! command -v docker >/dev/null; then
@@ -129,7 +129,10 @@ PROVISIONING DONE. Next steps (manual):
    scp -r .cert   extractor@<VM-IP>:/srv/extractor/
 
    On the VM:
-   sudo -u extractor chmod 600 /srv/extractor/.env /srv/extractor/.cert/bundle.pem
+   sudo -u extractor chmod 600 /srv/extractor/.env
+   # .cert/*.pem must stay world-readable (644) — the extractor container
+   # runs as a non-root UID different from the host's `extractor` user,
+   # and the CA bundle is public anyway (no private keys in there).
 
 2. Edit /srv/extractor/.env on the VM, ensure:
    - GHCR_OWNER=<your github username, lowercase>
