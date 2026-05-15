@@ -16,6 +16,12 @@ services:
     image: ghcr.io/${GHCR_OWNER}/openproject-extractor:latest
     pull_policy: always
 
+  # datalens-auth has no restart policy in upstream's compose and crashes on
+  # cold start when datalens-postgres's pg-auth-db isn't ready yet (postgres
+  # healthcheck only verifies pg-us-db). Auto-restart resolves the race.
+  auth:
+    restart: unless-stopped
+
   nginx:
     image: nginx:alpine
     restart: unless-stopped
