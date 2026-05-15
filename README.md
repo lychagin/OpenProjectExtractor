@@ -167,7 +167,7 @@ scripts/vendor-datalens.sh  Re-vendor DataLens compose from upstream.
 
 ## Production deploy
 
-The repo ships everything needed to run this stack 24/7 on a single Ubuntu 24.04 LTS VM (8 GB RAM, 50 GB disk, 2 vCPU).
+The repo ships everything needed to run this stack 24/7 on a single Ubuntu 24.04 LTS VM (8 GB RAM, ≥50 GB disk recommended, 2 vCPU). Default target is an internal LAN VM served over plain HTTP — for a public Internet deployment with Let's Encrypt TLS, see the git history before the LAN switch.
 
 ### One-time setup
 
@@ -177,14 +177,13 @@ On a fresh VM:
 sudo bash scripts/provision-vm.sh
 ```
 
-This installs Docker, sets up the `extractor` user, configures `ufw` (only 22/80/443 open), clones the repo into `/srv/extractor`, and writes the cron jobs. The script then prints a manual checklist for the steps it cannot do automatically:
+This installs Docker, sets up the `extractor` user, configures `ufw` (22/80 open), clones the repo into `/srv/extractor`, and writes the cron jobs. The script then prints a manual checklist for the steps it cannot do automatically:
 
 1. **Copy secrets** (`scp .env extractor@vm:/srv/extractor/.env` and `scp -r .cert extractor@vm:/srv/extractor/`).
-2. **Edit `/srv/extractor/.env`** on the VM and set `GHCR_OWNER`, `SERVER_NAME`, and the other secrets.
+2. **Edit `/srv/extractor/.env`** on the VM and set `GHCR_OWNER`, `SERVER_NAME` (VM hostname or IP), `AUTH_ADMIN_PASSWORD`, and the other secrets.
 3. **`docker login ghcr.io`** with a GitHub Personal Access Token (`read:packages` scope).
-4. **`certbot certonly --standalone`** to obtain the TLS certificate.
-5. **`cd /srv/extractor && make prod-up`** (as the `extractor` user) to bring up the full stack.
-6. **Change DataLens `admin/admin`** via the UI immediately on first login.
+4. **`cd /srv/extractor && make prod-up`** (as the `extractor` user) to bring up the full stack.
+5. **Log in** at `http://<SERVER_NAME>/` as `admin` / `<AUTH_ADMIN_PASSWORD>` and change the password via the DataLens UI if you want.
 
 ### How the deploy pipeline works
 
@@ -242,15 +241,13 @@ gunzip -c /srv/backups/daily/bugs-YYYY-MM-DD.sql.gz | \
 
 Likewise for DataLens — the dump is from `pg_dumpall` (plain SQL), so restore with `psql` against the `datalens-postgres` service in the same pipe pattern as above.
 
-### TLS certificate renewal
+### nginx reload after config change
 
-`certbot.timer` (systemd) auto-renews ~30 days before expiry. `provision-vm.sh` installs a deploy hook at `/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh` that reloads nginx inside its container after each renewal — no manual action needed.
-
-To force an immediate nginx reload (e.g. after manually copying a cert):
+The nginx config is rendered from `nginx/templates/datalens.conf.template` at container start. After editing the template, force a reload:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.datalens.yml -f docker-compose.prod.yml \
-    exec nginx nginx -s reload
+    restart nginx
 ```
 
 ### Manual deploy without waiting for cron

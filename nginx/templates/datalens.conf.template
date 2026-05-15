@@ -1,22 +1,18 @@
 # Rendered by nginx:alpine entrypoint at container start: the official image
 # runs envsubst on /etc/nginx/templates/*.template and writes the result to
 # /etc/nginx/conf.d/. Only ${SERVER_NAME} is substituted (passed in as env).
-# All other $variables are nginx runtime variables and are preserved (we use
-# the entrypoint's default ENVSUBST_TEMPLATE_DIR but a default vars filter).
+# All other $variables are nginx runtime variables and are preserved.
+#
+# HTTP-only LAN deployment. No TLS — service is reached over the internal
+# network at http://${SERVER_NAME}/. For a public deployment, re-introduce
+# the 443 server block + certbot.
 
 server {
-    listen 443 ssl;
-    http2 on;
+    listen 80 default_server;
     server_name ${SERVER_NAME};
-
-    ssl_certificate     /etc/letsencrypt/live/${SERVER_NAME}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${SERVER_NAME}/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
 
     client_max_body_size 50M;
 
-    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
 
@@ -33,10 +29,4 @@ server {
         proxy_read_timeout 300s;
         proxy_connect_timeout 75s;
     }
-}
-
-server {
-    listen 80;
-    server_name ${SERVER_NAME};
-    return 301 https://$host$request_uri;
 }

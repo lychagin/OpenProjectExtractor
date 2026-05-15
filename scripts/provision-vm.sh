@@ -2,13 +2,16 @@
 # Idempotent one-time provisioning for a fresh Ubuntu 24.04 LTS VM.
 # Run as root: sudo bash scripts/provision-vm.sh
 #
-# Sets up: docker, docker compose, ufw, certbot, the `extractor` user, the
+# Sets up: docker, docker compose, ufw, the `extractor` user, the
 # /srv/extractor and /srv/backups directories, and clones the repo.
 #
+# HTTP-only LAN deployment — no TLS. For a public deployment with Let's
+# Encrypt, re-introduce the certbot package install, the certbot deploy hook,
+# and `ufw allow 443/tcp` (see git history before commit changing this).
+#
 # Does NOT do (manual handoff steps printed at the end):
-#   - copy .env and .cert/bundle.pem from your laptop
+#   - copy .env from your laptop
 #   - docker login ghcr.io with a personal access token
-#   - certbot certonly to obtain the TLS certificate
 #   - first `make prod-up`
 #   - change DataLens admin password via UI
 
@@ -35,7 +38,7 @@ apt-get upgrade -y
 echo "==> Base packages"
 apt-get install -y \
     curl ca-certificates gnupg lsb-release \
-    ufw fail2ban certbot openssl
+    ufw fail2ban openssl
 
 echo "==> Docker engine + compose plugin"
 if ! command -v docker >/dev/null; then
@@ -68,8 +71,7 @@ echo "==> firewall (ufw)"
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp comment 'SSH'
-ufw allow 80/tcp comment 'HTTP redirect + Lets Encrypt challenge'
-ufw allow 443/tcp comment 'HTTPS'
+ufw allow 80/tcp comment 'HTTP (LAN)'
 ufw --force enable
 
 echo "==> repo clone"
@@ -115,30 +117,6 @@ else
     echo "    $CRON_FILE already present, leaving as-is"
 fi
 
-echo "==> certbot deploy hook for nginx reload"
-HOOK_FILE=/etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
-mkdir -p "$(dirname "$HOOK_FILE")"
-if [ ! -f "$HOOK_FILE" ]; then
-    cat > "$HOOK_FILE" <<'HOOK'
-#!/usr/bin/env bash
-# Reload nginx inside its docker container after certbot renews the cert.
-# Without this, nginx keeps serving the expired cert until manual reload.
-set -euo pipefail
-# Runs as root (certbot deploy hooks inherit root). Root can run docker
-# directly — no need for sudo -u extractor.
-cd /srv/extractor
-docker compose \
-    -f docker-compose.yml \
-    -f docker-compose.datalens.yml \
-    -f docker-compose.prod.yml \
-    exec -T nginx nginx -s reload
-HOOK
-    chmod +x "$HOOK_FILE"
-    echo "    wrote $HOOK_FILE"
-else
-    echo "    $HOOK_FILE already present, leaving as-is"
-fi
-
 cat <<'EOF'
 
 ============================================================
@@ -155,7 +133,8 @@ PROVISIONING DONE. Next steps (manual):
 
 2. Edit /srv/extractor/.env on the VM, ensure:
    - GHCR_OWNER=<your github username, lowercase>
-   - SERVER_NAME=<your.subdomain.example.com>
+   - SERVER_NAME=<VM hostname or IP, e.g. 192.168.1.31>
+   - AUTH_ADMIN_PASSWORD=<initial DataLens admin password>
    - All other secrets carried over from your local .env.
 
 3. Authenticate Docker to GitHub Container Registry:
@@ -165,14 +144,7 @@ PROVISIONING DONE. Next steps (manual):
    # https://github.com/settings/tokens (classic, no expiry preferred)
    echo "<YOUR_GH_PAT>" | docker login ghcr.io -u <your_github_username> --password-stdin
 
-4. Obtain TLS certificate (port 80 must be free at this point — nothing on the VM listens
-   there yet):
-
-   certbot certonly --standalone \
-       -d <your.subdomain.example.com> \
-       --agree-tos -m <your-email>
-
-5. Bring up the production stack (as extractor user):
+4. Bring up the production stack (as extractor user):
 
    sudo -u extractor -i
    cd /srv/extractor
@@ -180,11 +152,10 @@ PROVISIONING DONE. Next steps (manual):
    docker compose -f docker-compose.yml -f docker-compose.datalens.yml -f docker-compose.prod.yml \
        logs -f extractor nginx ui
 
-6. Visit https://<your.subdomain.example.com>/ and log in as admin/admin.
-   Immediately go to Settings -> Users and change the admin password.
-   Update DATALENS_ADMIN_PASSWORD in /srv/extractor/.env if you keep it there.
+5. Visit http://<SERVER_NAME>/ and log in as admin / <AUTH_ADMIN_PASSWORD>.
+   Change the admin password via the DataLens UI if you want a different one.
 
-7. Sanity-check the cron is running:
+6. Sanity-check the cron is running:
 
    tail -f /srv/extractor/cron.log     # should see "no new image" pulls every 5 min
    tail -f /srv/backups/backup.log     # populated after first 03:00 run
