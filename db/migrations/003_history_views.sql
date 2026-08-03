@@ -8,7 +8,13 @@ LANGUAGE sql IMMUTABLE AS $$
     SELECT status_name IN ('Closed', 'No issue found', 'Rejected');
 $$;
 
--- 2.2 Re-create v_bugs to delegate is_closed to the function above.
+-- 2.2 v_bugs is `SELECT *`, so its column list is only as wide as `bugs` was
+-- the moment the view was (re)created. Any later ALTER TABLE bugs ADD COLUMN
+-- shifts is_closed out of its existing position and CREATE OR REPLACE VIEW
+-- refuses that ("cannot change name of view column"). DROP + CREATE has no
+-- such restriction, so the view just re-tracks the table's current shape on
+-- every boot, with no maintenance needed here when bugs gains columns.
+DROP VIEW IF EXISTS v_bugs;
 CREATE OR REPLACE VIEW v_bugs AS
 SELECT *,
        is_status_closed(status_name) AS is_closed
