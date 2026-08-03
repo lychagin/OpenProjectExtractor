@@ -87,7 +87,7 @@ FROM bugs b
 CROSS JOIN LATERAL (SELECT (current_date - b.op_created_at::date) AS days) age
 WHERE b.deleted_at IS NULL
   AND b.type_name = 'Bug'
-  AND NOT is_status_closed(b.status_name);
+  AND NOT COALESCE(is_status_closed(b.status_name), false);
 
 COMMENT ON VIEW v_open_bugs IS
     'Open bugs for the "Открытые баги" dashboard: type=Bug, not soft-deleted, '

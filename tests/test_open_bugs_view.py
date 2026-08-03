@@ -117,6 +117,19 @@ def test_view_excludes_closed_statuses(db_conn):
         assert [r[0] for r in cur.fetchall()] == [1, 5]
 
 
+def test_view_includes_bugs_with_null_status(db_conn):
+    """NOT is_status_closed(status_name) is NULL (not true) when status_name
+    is NULL, so a plain `AND NOT is_status_closed(...)` filter would silently
+    drop such a row instead of surfacing it. In a BI view a hidden row is
+    worse than a visible oddity, so v_open_bugs must COALESCE to false.
+    """
+    _insert(db_conn, 1, status="anything")
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE bugs SET status_name = NULL WHERE id = 1")
+        cur.execute("SELECT id FROM v_open_bugs WHERE id = 1")
+        assert cur.fetchone() == (1,)
+
+
 def test_view_excludes_soft_deleted_and_non_bug_types(db_conn):
     _insert(db_conn, 1)
     _insert(db_conn, 2, deleted=True)
