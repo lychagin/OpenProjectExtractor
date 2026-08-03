@@ -174,8 +174,8 @@ Net effect: 43 rows in the default view where OpenProject shows 53.
 
 Two limitations worth knowing before you start:
 
-- DataLens OSS tables have no collapsible groups, so the "High (10) / Normal
-  (11) / Low (33)" accordion from OpenProject can't be reproduced. Charts 2–4
+- DataLens OSS tables have no collapsible groups, so the "High (7) / Normal
+  (4) / Low (32)" accordion from OpenProject can't be reproduced. Charts 2–4
   carry those counts instead and the table is flat, sorted by priority.
 - `age_days` counts from bug creation, not from entry into the current status.
   For time-in-status see `v_bug_time_in_status` and the `Bug trends` dashboard.
@@ -187,8 +187,9 @@ When you drop an integer column (`id`, `bug_count`, `event_count`, etc.) into th
 ## Tests
 
 ```bash
-make test               # 9 unit tests, fast, no DB needed
-make test-integration   # +24 integration tests (8 db + 16 history-views), requires `make up` first
+make test               # 12 unit tests, fast, no DB needed
+make test-integration   # 52 tests total (12 unit + 40 integration: 10 db + 16
+                         # history-views + 14 open-bugs-view), requires `make up` first
 ```
 
 Integration tests run all DML inside a single transaction that gets rolled back at teardown — safe to run against a populated production DB without losing data.
@@ -214,7 +215,8 @@ src/
   main.py       Entry point: argparse with --once and --dry-run, sleep loop otherwise.
   show_bug.py   Debug helper for `make show-bug ID=<n>`.
 db/migrations/  Idempotent SQL applied on every container start.
-tests/          test_client (unit) + test_db (integration, opt-in via --integration).
+tests/          test_client + test_wp_row (unit); test_db + test_history_views +
+                test_open_bugs_view (integration, opt-in via --integration).
 docker-compose.yml          Light stack: postgres + extractor.
 docker-compose.datalens.yml DataLens stack, vendored from upstream (see header for changes).
 scripts/vendor-datalens.sh  Re-vendor DataLens compose from upstream.
