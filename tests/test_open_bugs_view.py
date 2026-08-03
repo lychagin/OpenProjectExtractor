@@ -7,8 +7,89 @@ populated database.
 from pathlib import Path
 
 import pytest
+from psycopg.types.json import Jsonb
 
 pytestmark = pytest.mark.integration
+
+
+def _insert(
+    conn,
+    bug_id,
+    *,
+    module=("/api/v3/custom_options/64", "Терра - Пользователи"),
+    status="In progress",
+    type_name="Bug",
+    priority="Normal",
+    assignee="Исполнитель",
+    author="Автор",
+    age_days=10,
+    deleted=False,
+):
+    """Insert a bug row directly, leaving module_id/module_name unset.
+
+    The module columns are deliberately NOT written here — that is what
+    backfill_bug_modules() is expected to fill in from raw.
+    """
+    links = {
+        "status": {"href": "/api/v3/statuses/7", "title": status},
+        "type": {"href": "/api/v3/types/7", "title": type_name},
+        "priority": {"href": "/api/v3/priorities/8", "title": priority},
+    }
+    if module is not None:
+        links["customField14"] = {"href": module[0], "title": module[1]}
+    raw = {"id": bug_id, "subject": f"Bug {bug_id}", "_links": links}
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO bugs (id, subject, raw, type_name, status_name, priority_name,"
+            "                  assignee_name, author_name, op_created_at)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s,"
+            "         now() - make_interval(days => %s))",
+            (
+                bug_id, f"Bug {bug_id}", Jsonb(raw), type_name, status, priority,
+                assignee, author, age_days,
+            ),
+        )
+        if deleted:
+            cur.execute("UPDATE bugs SET deleted_at = now() WHERE id = %s", (bug_id,))
+
+
+def test_backfill_populates_module_from_raw(db_conn):
+    _insert(db_conn, 1)
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT backfill_bug_modules()")
+        assert cur.fetchone()[0] == 1
+        cur.execute("SELECT module_id, module_name FROM bugs WHERE id = 1")
+        assert cur.fetchone() == (64, "Терра - Пользователи")
+
+
+def test_backfill_is_idempotent(db_conn):
+    _insert(db_conn, 1)
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT backfill_bug_modules()")
+        assert cur.fetchone()[0] == 1
+        # Second run must find nothing left to do.
+        cur.execute("SELECT backfill_bug_modules()")
+        assert cur.fetchone()[0] == 0
+
+
+def test_backfill_leaves_null_when_custom_field_absent(db_conn):
+    _insert(db_conn, 1, module=None)
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT backfill_bug_modules()")
+        cur.execute("SELECT module_id, module_name FROM bugs WHERE id = 1")
+        assert cur.fetchone() == (None, None)
+
+
+def test_backfill_repairs_a_stale_module(db_conn):
+    _insert(db_conn, 1)
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT backfill_bug_modules()")
+        cur.execute("UPDATE bugs SET module_name = 'Старое значение' WHERE id = 1")
+        cur.execute("SELECT backfill_bug_modules()")
+        assert cur.fetchone()[0] == 1
+        cur.execute("SELECT module_name FROM bugs WHERE id = 1")
+        assert cur.fetchone()[0] == "Терра - Пользователи"
 
 
 def test_migrations_are_rerunnable(db_conn):
