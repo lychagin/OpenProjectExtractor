@@ -2,6 +2,13 @@
 -- v_open_bugs view behind the "Открытые баги" DataLens dashboard.
 -- Idempotent: safe to run on every container start.
 
+-- ALTER TABLE takes AccessExclusiveLock on `bugs` before even checking whether
+-- the column already exists, so the no-op path locks too, held until this
+-- migration's transaction commits. Bound the wait so a slow in-flight DataLens
+-- query on `bugs` fails the boot fast (container restart policy retries)
+-- instead of hanging indefinitely.
+SET LOCAL lock_timeout = '10s';
+
 ALTER TABLE bugs ADD COLUMN IF NOT EXISTS module_id   integer;
 ALTER TABLE bugs ADD COLUMN IF NOT EXISTS module_name text;
 
