@@ -134,28 +134,52 @@ differences, both chosen on purpose:
   we treat `Closed`, `No issue found` and `Rejected` as closed (per
   `is_status_closed()`).
 
-Net effect: 43 rows in the default view where OpenProject shows 53.
+Net effect: 43 rows in the default view where OpenProject shows 53 — measured
+2026-08-03. Both numbers drift as bugs are opened and closed; what should stay
+true is the *relationship*, not the figures.
 
 1. *Datasets* → *+ New* → connection `extractor-bugs` → drag in `v_open_bugs`
    → save as `open_bugs`.
-2. In the dataset, add one calculated field — it restores the click-through to
-   OpenProject that a BI table otherwise loses:
+2. In the dataset, add two calculated fields:
 
    ```
-   bug_link = URL('https://projects-customdev.wone-it.ru/work_packages/' + STR([id]), STR([id]))
+   bug_count = COUNT([id])
+   bug_link  = URL('https://projects-customdev.wone-it.ru/work_packages/' + STR([id]), STR([id]))
    ```
 
-3. Build nine charts from the `open_bugs` dataset:
+   `bug_count` is the only field that should end up under **Measures** in the
+   chart editor's field list; everything else stays a dimension. Building it
+   once here beats retyping `COUNT([id])` into nine charts and is what makes
+   the measure slots unambiguous.
+
+   `bug_link` restores the click-through to OpenProject that a BI table
+   otherwise loses. If it renders as literal text rather than a link, switch
+   the field's type to *Markup*.
+
+   **Leave `Aggregation` set to `No` on every source field**, `id` included.
+   This DataLens build has no dimension/measure switch in the dataset editor —
+   the `Aggregation` column *is* that switch. Set it on `id` and the field
+   becomes a measure everywhere, and can no longer be used as a dimension (for
+   example to sort the detail table by bug number).
+
+3. Build nine charts from the `open_bugs` dataset. Chart-type names below are
+   from the English UI; the Russian UI calls them Индикатор / Линейчатая /
+   Столбчатая / Таблица respectively.
 
    | # | Chart | Type | Configuration |
    |---|---|---|---|
-   | 1 | Всего открытых | Индикатор | `COUNT([id])` |
-   | 2–4 | High / Normal / Low | Индикатор ×3 | `COUNT([id])` + chart filter on `priority_name` |
-   | 5 | По статусам | Линейчатая | Y `status_name`, X `COUNT([id])`, sort by measure ↓ |
-   | 6 | По модулям | Линейчатая | Y `module_name`, X `COUNT([id])`, sort by measure ↓ |
-   | 7 | По исполнителям | Линейчатая | Y `assignee_name`, X `COUNT([id])`, sort by measure ↓ |
-   | 8 | Возраст открытых багов | Столбчатая | X `age_bucket` ordered by `age_bucket_rank`, Y `COUNT([id])`, color `priority_name` |
-   | 9 | Открытые баги | Таблица | `op_created_at`, `bug_link`, `priority_name`, `subject`, `module_name`, `status_name`, `assignee_name`, `author_name`, `age_days`; sort `priority_rank` ↑ then `id` ↑ |
+   | 1 | Всего открытых | Indicator | `bug_count` |
+   | 2–4 | High / Normal / Low | Indicator ×3 | `bug_count` + chart filter on `priority_name` |
+   | 5 | По статусам | Bar chart | Y `status_name`, X `bug_count`, sort by measure ↓ |
+   | 6 | По модулям | Bar chart | Y `module_name`, X `bug_count`, sort by measure ↓ |
+   | 7 | По исполнителям | Bar chart | Y `assignee_name`, X `bug_count`, sort by measure ↓ |
+   | 8 | Возраст открытых багов | Column chart | X `age_bucket` ordered by `age_bucket_rank`, Y `bug_count`, color `priority_name` |
+   | 9 | Открытые баги | Table | `op_created_at`, `bug_link`, `priority_name`, `subject`, `module_name`, `status_name`, `assignee_name`, `author_name`, `age_days`; sort `priority_rank` ↑ then `id` ↑ |
+
+   Note that **Bar chart and Column chart take their axes in opposite order**.
+   Bar chart (horizontal) puts the dimension on Y and the measure on X; Column
+   chart (vertical) is the other way round. Getting this backwards fails
+   silently — see the gotcha below.
 
 4. *Dashboards* → *+ New* → drop the nine charts on the grid. Suggested layout:
    indicator row (3 grid columns each), then 5+6, then 7+8, then chart 9 full
@@ -170,7 +194,8 @@ Net effect: 43 rows in the default view where OpenProject shows 53.
    | Модуль | `module_name` | all |
 
    These defaults reproduce the 43-row cut. Clearing "Автор" widens it to 60;
-   clearing the date filter too, to 82.
+   clearing the date filter too, to 82. (Again: 2026-08-03 figures. Use them to
+   confirm each selector actually bites, not as fixed expectations.)
 
 Two limitations worth knowing before you start:
 
@@ -179,6 +204,38 @@ Two limitations worth knowing before you start:
   carry those counts instead and the table is flat, sorted by priority.
 - `age_days` counts from bug creation, not from entry into the current status.
   For time-in-status see `v_bug_time_in_status` and the `Bug trends` dashboard.
+
+#### Gotcha: a dimension dropped into a measure slot fails silently
+
+The most expensive mistake when building these charts. Put a dimension into a
+section that expects a measure — `X` on a Bar chart, `Y` on a Column chart —
+and DataLens does not complain. It silently wraps the field in
+`COUNT(DISTINCT ...)`, drops the `GROUP BY`, and renders **one bar holding the
+grand total**. The chart looks plausible, just wrong, and the editor sits on a
+loading spinner long enough that the natural conclusion is "DataLens is slow"
+rather than "the config is wrong".
+
+Two tells, in order of reliability:
+
+1. **The generated SQL has no `GROUP BY`.** This is decisive. The data-api logs
+   every query it builds:
+
+   ```bash
+   docker compose ... logs --tail=400 data-api 2>&1 \
+       | grep -o 'SQL query for dataset: [^"]*' | tail -2
+   ```
+
+   A correct chart 6 produces `SELECT module_name, count(id) ... GROUP BY`.
+   The broken one produces `SELECT count(id), count(DISTINCT module_name)` with
+   no grouping at all.
+
+2. **The field's pill changes colour.** A dimension sitting in a dimension slot
+   is green with a `T` (or date) icon. The same field turned into a measure
+   goes blue with a `#`. If a string field shows `#`, it is being aggregated.
+
+The same logs are the fastest way to answer "is DataLens hanging or is my chart
+wrong?" in general — they carry the SQL, the row count, and a `ds-result-full`
+timing for every request.
 
 #### Gotcha: DataLens auto-aggregates integers as `sum`
 
