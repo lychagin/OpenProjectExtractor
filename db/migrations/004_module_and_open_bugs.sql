@@ -24,12 +24,10 @@ DECLARE
     updated integer;
 BEGIN
     UPDATE bugs SET
-        module_id   = NULLIF(regexp_replace(
-                          raw->'_links'->'customField14'->>'href', '^.*/', ''), '')::integer,
+        module_id   = substring(raw->'_links'->'customField14'->>'href' FROM '([0-9]+)$')::integer,
         module_name = raw->'_links'->'customField14'->>'title'
     WHERE (module_id, module_name) IS DISTINCT FROM (
-              NULLIF(regexp_replace(
-                  raw->'_links'->'customField14'->>'href', '^.*/', ''), '')::integer,
+              substring(raw->'_links'->'customField14'->>'href' FROM '([0-9]+)$')::integer,
               raw->'_links'->'customField14'->>'title');
     GET DIAGNOSTICS updated = ROW_COUNT;
     RETURN updated;

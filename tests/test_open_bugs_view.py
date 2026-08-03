@@ -92,6 +92,21 @@ def test_backfill_repairs_a_stale_module(db_conn):
         assert cur.fetchone()[0] == "Терра - Пользователи"
 
 
+def test_backfill_ignores_malformed_href(db_conn):
+    """customField14.href without a trailing numeric id (e.g. the bare
+    collection endpoint) must backfill to module_id IS NULL, not raise.
+
+    src/db.py's _link_id() already degrades gracefully (try/except ValueError
+    -> None) for this exact input; the SQL backfill must agree.
+    """
+    _insert(db_conn, 1, module=("/api/v3/custom_options", "Терра - Пользователи"))
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT backfill_bug_modules()")
+        assert cur.fetchone()[0] == 1
+        cur.execute("SELECT module_id, module_name FROM bugs WHERE id = 1")
+        assert cur.fetchone() == (None, "Терра - Пользователи")
+
+
 def test_view_excludes_closed_statuses(db_conn):
     for i, status in enumerate(
         ["In progress", "Closed", "No issue found", "Rejected", "Developed"], start=1
