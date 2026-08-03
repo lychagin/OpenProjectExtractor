@@ -593,7 +593,7 @@ ssh dev-admin@192.168.1.31 \
      \"SELECT count(*) AS open_bugs, count(*) FILTER (WHERE module_name = '— без модуля —') AS no_module FROM v_open_bugs\""
 ```
 
-Expected: `open_bugs` ≈ 82, `no_module` ≈ 3. Exact numbers drift with real activity — what matters is that the view exists, is non-empty, and that `no_module` is a small minority rather than everything (the latter would mean the backfill silently matched nothing).
+Expected: `open_bugs` ≈ 82, `no_module` ≈ 37. (The "3" you may have seen elsewhere is the count within the 43-row default *selector cut* on the dashboard, not within this unfiltered view.) Exact numbers drift with real activity — what matters is that the view exists, is non-empty, and that `no_module` is a large-but-partial slice rather than everything (the latter would mean the backfill silently matched nothing).
 
 - [ ] **Step 3: Sanity-check the module breakdown**
 

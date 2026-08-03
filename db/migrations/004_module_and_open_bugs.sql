@@ -58,8 +58,10 @@ SELECT
     b.status_name,
     b.priority_name,
     b.author_name,
-    -- COALESCE, not raw NULLs: 3 open bugs have no module and 6 no assignee, and
-    -- DataLens renders NULL as an unlabeled category in bars and selectors.
+    -- COALESCE, not raw NULLs: of the 82 rows this view returns (unfiltered),
+    -- 37 have no module and 16 no assignee; the default 43-row dashboard
+    -- selector cut has fewer (3 and 6 respectively). DataLens renders NULL as
+    -- an unlabeled category in bars and selectors either way.
     COALESCE(b.module_name,   '— без модуля —')  AS module_name,
     COALESCE(b.assignee_name, '— не назначен —') AS assignee_name,
     -- Rank columns exist because DataLens sorts categories alphabetically:
