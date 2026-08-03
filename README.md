@@ -118,6 +118,68 @@ A second dashboard fed by SQL views over `bug_history`. Build it after `Bugs ove
 
 Caveat: history is collected forward from when the extractor first ran (~2026-04-30). Trends before that date are not reconstructable. Reopens (Closed → In progress → Closed) count as separate close events. The closed-set is `Closed`, `No issue found`, `Rejected` (per `is_status_closed()` in the DB, used by `v_bugs.is_closed` too).
 
+### Open bugs dashboard
+
+A third dashboard reproducing the OpenProject view
+[query 245](https://projects-customdev.wone-it.ru/projects/dom-zhkkh/work_packages?query_id=245)
+("7 Все открытые баги / задачи - по статусам"), with the analytical cuts a
+work-package list can't give.
+
+It is deliberately **not** row-for-row identical to the OpenProject view. Two
+differences, both chosen on purpose:
+
+- **Bugs only.** Query 245 also includes `Question` and `Task`; the extractor
+  pulls only `Bug`.
+- **Our closed-set wins.** Query 245 treats everything but `Closed` as open;
+  we treat `Closed`, `No issue found` and `Rejected` as closed (per
+  `is_status_closed()`).
+
+Net effect: 43 rows in the default view where OpenProject shows 53.
+
+1. *Datasets* → *+ New* → connection `extractor-bugs` → drag in `v_open_bugs`
+   → save as `open_bugs`.
+2. In the dataset, add one calculated field — it restores the click-through to
+   OpenProject that a BI table otherwise loses:
+
+   ```
+   bug_link = URL('https://projects-customdev.wone-it.ru/work_packages/' + STR([id]), STR([id]))
+   ```
+
+3. Build nine charts from the `open_bugs` dataset:
+
+   | # | Chart | Type | Configuration |
+   |---|---|---|---|
+   | 1 | Всего открытых | Индикатор | `COUNT([id])` |
+   | 2–4 | High / Normal / Low | Индикатор ×3 | `COUNT([id])` + chart filter on `priority_name` |
+   | 5 | По статусам | Линейчатая | Y `status_name`, X `COUNT([id])`, sort by measure ↓ |
+   | 6 | По модулям | Линейчатая | Y `module_name`, X `COUNT([id])`, sort by measure ↓ |
+   | 7 | По исполнителям | Линейчатая | Y `assignee_name`, X `COUNT([id])`, sort by measure ↓ |
+   | 8 | Возраст открытых багов | Столбчатая | X `age_bucket` ordered by `age_bucket_rank`, Y `COUNT([id])`, color `priority_name` |
+   | 9 | Открытые баги | Таблица | `op_created_at`, `bug_link`, `priority_name`, `subject`, `module_name`, `status_name`, `assignee_name`, `author_name`, `age_days`; sort `priority_rank` ↑ then `id` ↑ |
+
+4. *Dashboards* → *+ New* → drop the nine charts on the grid. Suggested layout:
+   indicator row (3 grid columns each), then 5+6, then 7+8, then chart 9 full
+   width. Save as `Открытые баги`.
+5. Add four selectors, all bound to the `open_bugs` dataset:
+
+   | Selector | Field | Default |
+   |---|---|---|
+   | Автор | `author_name` | Ольга Черняева, Nikita Avdonin, Полина Маренко, Ольга Коцур, Кирилл Занин, Ольга Сергеевна Бровина, Владимир Бабушкин, Аркадий Лоскутов, Екатерина Губова |
+   | Создано | `op_created_at` | from 2026-03-01, no upper bound |
+   | Приоритет | `priority_name` | all |
+   | Модуль | `module_name` | all |
+
+   These defaults reproduce the 43-row cut. Clearing "Автор" widens it to 60;
+   clearing the date filter too, to 82.
+
+Two limitations worth knowing before you start:
+
+- DataLens OSS tables have no collapsible groups, so the "High (7) / Normal
+  (4) / Low (32)" accordion from OpenProject can't be reproduced. Charts 2–4
+  carry those counts instead and the table is flat, sorted by priority.
+- `age_days` counts from bug creation, not from entry into the current status.
+  For time-in-status see `v_bug_time_in_status` and the `Bug trends` dashboard.
+
 #### Gotcha: DataLens auto-aggregates integers as `sum`
 
 When you drop an integer column (`id`, `bug_count`, `event_count`, etc.) into the Y axis, DataLens defaults the aggregation to `sum`. For a "how many bugs?" chart that's wrong — `sum([id])` is the sum of primary keys, not a count of rows. Use `count([id])` instead, either by changing the field's aggregation function inline (click the Y pill → switch from `Sum` to `Count`) or by making a calculated measure `bug_count = COUNT([id])` in the dataset.
@@ -125,8 +187,9 @@ When you drop an integer column (`id`, `bug_count`, `event_count`, etc.) into th
 ## Tests
 
 ```bash
-make test               # 9 unit tests, fast, no DB needed
-make test-integration   # +24 integration tests (8 db + 16 history-views), requires `make up` first
+make test               # 12 unit tests, fast, no DB needed
+make test-integration   # 52 tests total (12 unit + 40 integration: 10 db + 16
+                         # history-views + 14 open-bugs-view), requires `make up` first
 ```
 
 Integration tests run all DML inside a single transaction that gets rolled back at teardown — safe to run against a populated production DB without losing data.
@@ -142,6 +205,14 @@ make dry-run            # fetch from OpenProject without touching the DB
 
 `.github/workflows/extract-bugs.yml` runs on push and weekly cron — unit tests + a `--dry-run` smoke fetch (no DB needed in CI). Real syncing happens on the VM, not in Actions.
 
+The smoke fetch hits the live OpenProject, whose TLS chain is missing its intermediate (see Prerequisites). A runner has no `.cert/bundle.pem`, so the workflow assembles the equivalent itself: `.cert/globalsign-intermediate.pem` is tracked in git — it is a public GlobalSign CA, not a secret — and gets concatenated with `certifi`'s bundle into `REQUESTS_CA_BUNDLE`. Everything else under `.cert/` stays ignored.
+
+That intermediate expires **2029-03-18**. When OpenProject's certificate is reissued off a different chain, refresh the file with:
+
+```bash
+openssl s_client -showcerts -connect projects-customdev.wone-it.ru:443 </dev/null
+```
+
 ## Repo layout
 
 ```
@@ -152,7 +223,8 @@ src/
   main.py       Entry point: argparse with --once and --dry-run, sleep loop otherwise.
   show_bug.py   Debug helper for `make show-bug ID=<n>`.
 db/migrations/  Idempotent SQL applied on every container start.
-tests/          test_client (unit) + test_db (integration, opt-in via --integration).
+tests/          test_client + test_wp_row (unit); test_db + test_history_views +
+                test_open_bugs_view (integration, opt-in via --integration).
 docker-compose.yml          Light stack: postgres + extractor.
 docker-compose.datalens.yml DataLens stack, vendored from upstream (see header for changes).
 scripts/vendor-datalens.sh  Re-vendor DataLens compose from upstream.

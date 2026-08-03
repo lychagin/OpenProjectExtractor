@@ -136,3 +136,22 @@ def test_v_bugs_view_derives_is_closed(db_conn):
     # ids 1,2,3 → Closed/No issue found/Rejected → is_closed=True
     # id 4 → In progress → is_closed=False
     assert rows == [(1, True), (2, True), (3, True), (4, False)]
+
+
+def test_module_columns_are_upserted(db_conn):
+    wp = _wp(id=1)
+    wp["_links"]["customField14"] = {
+        "href": "/api/v3/custom_options/64",
+        "title": "Терра - Пользователи",
+    }
+    db.upsert_bug(db_conn, wp)
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT module_id, module_name FROM bugs WHERE id = 1")
+        assert cur.fetchone() == (64, "Терра - Пользователи")
+
+
+def test_module_columns_are_null_without_custom_field(db_conn):
+    db.upsert_bug(db_conn, _wp(id=1))
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT module_id, module_name FROM bugs WHERE id = 1")
+        assert cur.fetchone() == (None, None)

@@ -157,7 +157,11 @@ activemq-data/
 .env
 .envrc
 .venv
-.cert/
+# Ignore the contents, not the directory: the CI smoke test needs the
+# intermediate CA tracked (it is a public GlobalSign cert, not a secret), and a
+# negation cannot re-include a file whose parent directory is itself excluded.
+.cert/*
+!.cert/globalsign-intermediate.pem
 
 # Extractor output
 output/

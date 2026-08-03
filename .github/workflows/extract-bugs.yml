@@ -35,9 +35,19 @@ jobs:
       - name: Run unit tests
         run: python -m pytest tests/ -v
 
+      # projects-customdev.wone-it.ru does not serve the intermediate of its
+      # certificate chain, so the runner's default trust store cannot build a
+      # path to a root and every smoke fetch died with CERTIFICATE_VERIFY_FAILED.
+      # Trusting the intermediate directly is exactly what .cert/bundle.pem does
+      # on developer machines; here we assemble the equivalent from certifi plus
+      # the one tracked intermediate.
+      - name: Build CA bundle for OpenProject's incomplete chain
+        run: cat "$(python -m certifi)" .cert/globalsign-intermediate.pem > "$RUNNER_TEMP/ca-bundle.pem"
+
       - name: Smoke-fetch bugs from OpenProject
         env:
           OPENPROJECTTOKEN: ${{ secrets.OPENPROJECTTOKEN }}
           OPENPROJECT_URL: https://projects-customdev.wone-it.ru
           PROJECT_IDENTIFIER: dom-zhkkh
+          REQUESTS_CA_BUNDLE: ${{ runner.temp }}/ca-bundle.pem
         run: python -m src.main --dry-run

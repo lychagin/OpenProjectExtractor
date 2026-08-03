@@ -49,6 +49,11 @@ def _link_title(link: dict | None) -> str | None:
     return link.get("title") if isinstance(link, dict) else None
 
 
+# OpenProject custom field holding "Модуль". Re-verify after any OpenProject
+# form-configuration change with:
+#   GET /api/v3/work_packages/schemas/13-7  → customField14.name == "Модуль"
+MODULE_CF_KEY = "customField14"
+
 _COLUMNS = (
     "id", "subject", "description_md", "start_date", "due_date",
     "op_created_at", "op_updated_at", "lock_version",
@@ -57,6 +62,7 @@ _COLUMNS = (
     "type_id", "type_name", "project_id", "project_name",
     "author_id", "author_name", "assignee_id", "assignee_name",
     "responsible_id", "responsible_name", "version_id", "version_name",
+    "module_id", "module_name",
     "raw",
 )
 
@@ -93,6 +99,8 @@ def _wp_to_row(wp: dict[str, Any]) -> dict[str, Any]:
         "responsible_name": _link_title(links.get("responsible")),
         "version_id": _link_id(links.get("version")),
         "version_name": _link_title(links.get("version")),
+        "module_id": _link_id(links.get(MODULE_CF_KEY)),
+        "module_name": _link_title(links.get(MODULE_CF_KEY)),
         "raw": Jsonb(wp),
     }
 
