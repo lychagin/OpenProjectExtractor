@@ -37,13 +37,14 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
-  # See datalens/gunicorn_logging.ini — overrides the image's DEBUG root logger
-  # to silence the LatencyTracker stats spam (the 4.7 GB offender).
+  # The 4.7 GB offender. dl_data_api calls dl_logging.configure_logging()
+  # without a log_level, so its root logger is hardcoded to DEBUG and
+  # LatencyTracker writes a stats line every 5s per worker (~58 MB/day, idle or
+  # not). No env var or settings hook can raise that level in this image, so the
+  # module is patched via bind-mount instead. See datalens/aio_latency_tracking.py.
   data-api:
-    environment:
-      BI_API_GUNICORN_LOG_CONFIG: /etc/dl/gunicorn_logging.ini
     volumes:
-      - ./datalens/gunicorn_logging.ini:/etc/dl/gunicorn_logging.ini:ro
+      - ./datalens/aio_latency_tracking.py:/venv/lib/python3.10/site-packages/dl_app_tools/aio_latency_tracking.py:ro
     logging: *default-logging
 
   control-api:

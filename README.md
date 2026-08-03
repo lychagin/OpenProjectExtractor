@@ -231,11 +231,29 @@ for d in /var/lib/docker/containers/*/; do id=$(basename "$d");
                     "$(docker inspect -f '{{.Name}}' "$id")"; done | sort -rn | head
 ```
 
-All services cap their logs at 50 MB x 3 files via the `x-logging` anchor in
-`docker-compose.prod.yml`, and `datalens/gunicorn_logging.ini` raises data-api's
-root logger from DEBUG to INFO — without that, `LatencyTracker` writes a stats
-line every 5s per worker forever (it filled 4.7 GB in 2.5 months). To reclaim an
-already-bloated log without restarting the container:
+Two independent guards keep this in check, both in `docker-compose.prod.yml`:
+
+- The `x-logging` anchor caps every service at 50 MB x 3 files (~1.8 GB worst
+  case for the whole stack).
+- `datalens/aio_latency_tracking.py` is bind-mounted over the same module inside
+  the data-api image. Upstream's `LatencyTracker` logs a DEBUG stats line every
+  5s per gunicorn worker — ~58 MB/day even when nobody uses DataLens, which
+  filled 4.7 GB in 2.5 months. `dl_data_api` calls `configure_logging()` without
+  a `log_level`, so its root logger is hardcoded to DEBUG and no env var can
+  raise it; patching the module is the only lever. The patch drops only the
+  stats logging, keeping the "High latency" WARNING.
+
+**After bumping the `datalens-data-api` image tag**, re-check that the patch
+still lands — the mount path contains `python3.10`, and if the interpreter
+version changes the mount silently stops applying (the spam returns, nothing
+breaks):
+
+```bash
+id=$(docker inspect -f '{{.Id}}' datalens-data-api)
+sudo grep -c 'LatencyTracker' "/var/lib/docker/containers/$id/$id-json.log"   # want: 0
+```
+
+To reclaim an already-bloated log without restarting the container:
 
 ```bash
 id=$(docker inspect -f '{{.Id}}' datalens-data-api)
