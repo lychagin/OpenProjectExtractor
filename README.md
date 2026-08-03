@@ -205,6 +205,14 @@ make dry-run            # fetch from OpenProject without touching the DB
 
 `.github/workflows/extract-bugs.yml` runs on push and weekly cron — unit tests + a `--dry-run` smoke fetch (no DB needed in CI). Real syncing happens on the VM, not in Actions.
 
+The smoke fetch hits the live OpenProject, whose TLS chain is missing its intermediate (see Prerequisites). A runner has no `.cert/bundle.pem`, so the workflow assembles the equivalent itself: `.cert/globalsign-intermediate.pem` is tracked in git — it is a public GlobalSign CA, not a secret — and gets concatenated with `certifi`'s bundle into `REQUESTS_CA_BUNDLE`. Everything else under `.cert/` stays ignored.
+
+That intermediate expires **2029-03-18**. When OpenProject's certificate is reissued off a different chain, refresh the file with:
+
+```bash
+openssl s_client -showcerts -connect projects-customdev.wone-it.ru:443 </dev/null
+```
+
 ## Repo layout
 
 ```
