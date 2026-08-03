@@ -216,6 +216,32 @@ tail -f /srv/extractor/cron.log                  # cron-pull activity
 tail -f /srv/backups/backup.log                  # last backup run
 ```
 
+### Disk usage / container logs
+
+The stack's images alone are ~7 GB, so a 23 GB disk leaves little headroom. Check
+what is actually consuming it:
+
+```bash
+df -h /
+sudo du -xhd1 /var/lib | sort -rh | head        # containerd (images) vs docker (logs/volumes)
+
+# Per-container log sizes
+for d in /var/lib/docker/containers/*/; do id=$(basename "$d");
+  printf '%s\t%s\n' "$(sudo stat -c %s "$d$id-json.log")" \
+                    "$(docker inspect -f '{{.Name}}' "$id")"; done | sort -rn | head
+```
+
+All services cap their logs at 50 MB x 3 files via the `x-logging` anchor in
+`docker-compose.prod.yml`, and `datalens/gunicorn_logging.ini` raises data-api's
+root logger from DEBUG to INFO — without that, `LatencyTracker` writes a stats
+line every 5s per worker forever (it filled 4.7 GB in 2.5 months). To reclaim an
+already-bloated log without restarting the container:
+
+```bash
+id=$(docker inspect -f '{{.Id}}' datalens-data-api)
+sudo truncate -s 0 "/var/lib/docker/containers/$id/$id-json.log"
+```
+
 ### Roll back to a previous image
 
 If a bad commit shipped to `:latest`:

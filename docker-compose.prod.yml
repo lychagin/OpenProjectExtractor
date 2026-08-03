@@ -10,17 +10,62 @@
 #
 # (Or `make prod-up`.)
 
+# Log rotation. Neither upstream's DataLens compose nor ours sets any limit, so
+# every container's json.log grows without bound: datalens-data-api alone hit
+# 4.7 GB in 2.5 months and pushed the VM's 23 GB disk to 95%. 50 MB x 3 files
+# caps the whole stack at ~1.8 GB worst case.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   extractor:
     build: !reset null
     image: ghcr.io/${GHCR_OWNER}/openproject-extractor:latest
     pull_policy: always
+    logging: *default-logging
+
+  postgres:
+    logging: *default-logging
 
   # datalens-auth has no restart policy in upstream's compose and crashes on
   # cold start when datalens-postgres's pg-auth-db isn't ready yet (postgres
   # healthcheck only verifies pg-us-db). Auto-restart resolves the race.
   auth:
     restart: unless-stopped
+    logging: *default-logging
+
+  # See datalens/gunicorn_logging.ini — overrides the image's DEBUG root logger
+  # to silence the LatencyTracker stats spam (the 4.7 GB offender).
+  data-api:
+    environment:
+      BI_API_GUNICORN_LOG_CONFIG: /etc/dl/gunicorn_logging.ini
+    volumes:
+      - ./datalens/gunicorn_logging.ini:/etc/dl/gunicorn_logging.ini:ro
+    logging: *default-logging
+
+  control-api:
+    logging: *default-logging
+
+  datalens-postgres:
+    logging: *default-logging
+
+  us:
+    logging: *default-logging
+
+  ui:
+    logging: *default-logging
+
+  ui-api:
+    logging: *default-logging
+
+  meta-manager:
+    logging: *default-logging
+
+  temporal:
+    logging: *default-logging
 
   nginx:
     image: nginx:alpine
@@ -34,3 +79,4 @@ services:
       - /dev/null:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - ui
+    logging: *default-logging
